@@ -1,3 +1,11 @@
+# Azure2Word.ps1
+Azure2Word uses powershell to get Azure information and puts this in a Word document
+Works with Word Office365
+
+Connects to Azure powershell to get information
+.PARAMETER Customer
+[REQUIRED] This is the companyname that is used in the documentation
+.PARAMETER ReportPath
 [REQUIRED] This is the path where the report is stored
 .PARAMETER TenantId
 [OPTIONAL] When you have mutiple Tennants (CSP) enter the Tenant GUID
