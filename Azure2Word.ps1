@@ -25,7 +25,7 @@ Uses modules AZ and Az.Reservations
 Install-module -Name az
 Install-Module -Name Az.Accounts -RequiredVersion 1.9.2
 Install-Module -Name Az.Reservations
-Last Modified: 2020/12/2
+Last Modified: 2020/12/4
 #>
 
 Param
