@@ -81,6 +81,7 @@ $MediumShading1 = $AllStyles[38].Namelocal
 $Selection.Style = $Title
 $Selection.TypeText("Azure Documentation for $Customer")
 $Selection.TypeParagraph()
+$Selection.TypeParagraph()
 
 ### Add the TOC
 $range = $Selection.Range
@@ -94,6 +95,7 @@ $Selection.TypeParagraph()
 
 
 ## Add some text
+$Selection.InsertNewPage()
 $Selection.Style = $Heading1
 $Selection.TypeText("Virtual Machines")
 $Selection.TypeParagraph()
@@ -106,11 +108,8 @@ $ALLAzureResources = Get-AzResource
 Write-Host "Getting VM's"
 $VMs = Get-AzVM | Sort-Object Name
 
-## Add a table for VMs
-$VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 5,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-)
+$VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 5)
+$VMTable.AllowAutoFit = $true
 
 $VMTable.Style = $MediumShading1
 $VMTable.Cell(1,1).Range.Text = "Name"
@@ -159,10 +158,8 @@ Write-Host "Getting Disk information"
 $Disks = get-Azdisk | Sort-Object Name
 
 ## Add a table for Disks
-$DiskTable = $Selection.Tables.add($Word.Selection.Range, $Disks.Count + 1, 6,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-)
+$DiskTable = $Selection.Tables.add($Word.Selection.Range, $Disks.Count + 1, 6)
+$DiskTable.AllowAutoFit = $true
 
 $DiskTable.Style = $MediumShading1
 $DiskTable.Cell(1,1).Range.Text = "DiskName"
@@ -215,10 +212,8 @@ $Selection.TypeParagraph()
 Write-Host "Getting Network interfaces"
 $NICs = Get-AzNetworkInterface | Sort-Object Name
 
-$NICTable = $Selection.Tables.add($Word.Selection.Range, $NICs.Count + 1, 7,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-)
+$NICTable = $Selection.Tables.add($Word.Selection.Range, $NICs.Count + 1, 7)
+$NICTable.AllowAutoFit = $true
 
 $NICTable.Style = $MediumShading1
 $NICTable.Cell(1,1).Range.Text = "Virtual Machine"
@@ -280,30 +275,35 @@ $Selection.Style = $Heading2
 $Selection.TypeText("Reservations")
 $Selection.TypeParagraph()
 Write-Host "Getting Reservations"
-$ALLReservations = Get-AzReservationOrder | Sort-Object Name
-$ReservationTable = $Selection.Tables.add($Word.Selection.Range, $ALLReservations.Count + 1, 4,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-)
+$ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
+$ReservationTable = $Selection.Tables.add($Word.Selection.Range, $ALLReservationOrders.Count + 1, 6)
+$ReservationTable.AllowAutoFit = $true
 
 $ReservationTable.Style = $MediumShading1
 $ReservationTable.Cell(1,1).Range.Text = "DisplayName"
-$ReservationTable.Cell(1,2).Range.Text = "Start"
-$ReservationTable.Cell(1,3).Range.Text = "Term"
-$ReservationTable.Cell(1,4).Range.Text = "End"
+$ReservationTable.Cell(1,2).Range.Text = "VMType"
+$ReservationTable.Cell(1,3).Range.Text = "Quantity"
+$ReservationTable.Cell(1,4).Range.Text = "Start"
+$ReservationTable.Cell(1,5).Range.Text = "Term"
+$ReservationTable.Cell(1,6).Range.Text = "End"
 
 $i=2
 
 Write-Host "Creating Reservation table"
-Foreach ($Reservation in $ALLReservations) {
+Foreach ($ReservationOrder in $ALLReservationOrders) {
+    $Reservation = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
     $ReservationTable.cell(($i),1).range.Bold = 0
     $ReservationTable.cell(($i),1).range.text = $Reservation.DisplayName
+    $StartTime = $Reservation.EffectiveDateTime
     $ReservationTable.cell(($i),2).range.Bold = 0
-    $StartTime = $Reservation.CreatedDateTime
-    $ReservationTable.cell(($i),2).range.text = $StartTime.ToString()
+    $ReservationTable.cell(($i),2).range.text = $Reservation.Sku
     $ReservationTable.cell(($i),3).range.Bold = 0
-    $Term = $Reservation.Term
-    $ReservationTable.cell(($i),3).range.text = $Term
+    $ReservationTable.cell(($i),3).range.text = $Reservation.Quantity
+    $ReservationTable.cell(($i),4).range.Bold = 0
+    $ReservationTable.cell(($i),4).range.text = $StartTime.ToString()
+    $Term = $ReservationOrder.Term
+    $ReservationTable.cell(($i),5).range.Bold = 0
+    $ReservationTable.cell(($i),5).range.text = $Term
     $Duration = $Term.substring(1,1)
     $LastChar = $Term.substring(2,1)
     #Using switch to be flexible
@@ -312,8 +312,8 @@ Foreach ($Reservation in $ALLReservations) {
             $EndTime = $StartTime.AddYears($Duration)
         }
     }
-    $ReservationTable.cell(($i),4).range.Bold = 0
-    $ReservationTable.cell(($i),4).range.text = $EndTime.ToString()
+    $ReservationTable.cell(($i),6).range.Bold = 0
+    $ReservationTable.cell(($i),6).range.text = $EndTime.ToString()
     $i++
 }
 
@@ -330,10 +330,8 @@ $Selection.TypeParagraph()
 Write-Host "Getting NSGs"
 $NSGs = Get-AzNetworkSecurityGroup | Sort-Object Name
 
-$NSGTable = $Selection.Tables.add($Word.Selection.Range, $NSGs.Count + 1, 4,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-)
+$NSGTable = $Selection.Tables.add($Word.Selection.Range, $NSGs.Count + 1, 4)
+$NSGTable.AllowAutoFit = $true
 
 $NSGTable.Style = $MediumShading1
 $NSGTable.Cell(1,1).Range.Text = "NSG Name"
@@ -404,10 +402,8 @@ ForEach ($NSG in $NSGs) {
 		$NSGRulesDefault = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG -DefaultRules | Sort-Object Name
 		$NSGRuleCount = $NSGRulesCustom.Count + $NSGRulesDefault.Count
         ### Add a table for each NSG, the NSg has custom rules
-        $NSGRuleTable = $Selection.Tables.add($Word.Selection.Range, $NSGRuleCount + 1, 9,
-        [Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-        [Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent
-           )
+        $NSGRuleTable = $Selection.Tables.add($Word.Selection.Range, $NSGRuleCount + 1, 9)
+        $NSGRuleTable.AllowAutoFit = $true
 
         $NSGRuleTable.Style = $MediumShading1
         $NSGRuleTable.Cell(1,1).Range.Text = "Rule Name"
@@ -514,50 +510,47 @@ $NetworkGatewayConnections = $NetworkGatewayConnections | Sort-Object Name
 ########
 ######## Create a table for VPN GatewayConnections
 ########
-$NGCTable = $Selection.Tables.add($Word.Selection.Range, $NetworkGatewayConnections.Count + 2, 7,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent)
+$VPNTable = $Selection.Tables.add($Word.Selection.Range, $NetworkGatewayConnections.Count + 1, 7)
+$VPNTable.AllowAutoFit = $true
 
-$NGCTable.Style = $MediumShading1
-$NGCTable.Cell(1,1).Range.Text = "VPN"
-$NGCTable.Cell(1,2).Range.Text = "ResourceGroup"
-$NGCTable.Cell(1,3).Range.Text = "AzureEndpoint"
-$NGCTable.Cell(1,4).Range.Text = "LocalEndpoint"
-$NGCTable.Cell(1,5).Range.Text = "Status"
-$NGCTable.Cell(1,6).Range.Text = "EgressBytesTransferredGB"
-$NGCTable.Cell(1,7).Range.Text = "IngressBytesTransferredGB"
+$VPNTable.Style = $MediumShading1
+$VPNTable.Cell(1,1).Range.Text = "VPN"
+$VPNTable.Cell(1,2).Range.Text = "ResourceGroup"
+$VPNTable.Cell(1,3).Range.Text = "AzureEndpoint"
+$VPNTable.Cell(1,4).Range.Text = "LocalEndpoint"
+$VPNTable.Cell(1,5).Range.Text = "Status"
+$VPNTable.Cell(1,6).Range.Text = "EgressBytesTransferredGB"
+$VPNTable.Cell(1,7).Range.Text = "IngressBytesTransferredGB"
 
 ## Values
 $i=2
 Write-Host "Creating VPN table"
 Foreach ($NGC in $NetworkGatewayConnections) {
-
-
-    $NGCTable.cell(($i),1).range.Bold = 0
-    $NGCTable.cell(($i),1).range.text = $NGC.Name
-    $NGCTable.cell(($i),2).range.Bold = 0
+    $VPNTable.cell(($i),1).range.Bold = 0
+    $VPNTable.cell(($i),1).range.text = $NGC.Name
+    $VPNTable.cell(($i),2).range.Bold = 0
     $ResourceGroupName = $NGC.ResourceGroupName
-    $NGCTable.cell(($i),2).range.text = $ResourceGroupName
+    $VPNTable.cell(($i),2).range.text = $ResourceGroupName
     if (!($LocalVPNEndpoints.Contains($ResourceGroupName))) { $LocalVPNEndpoints.Add($ResourceGroupName) | Out-Null }
-    $NGCTable.cell(($i),3).range.Bold = 0
+    $VPNTable.cell(($i),3).range.Bold = 0
     $Parts = $NGC.VirtualNetworkGateway1.id.Split("/")
     $Endpoint = $Parts[8]
-    $NGCTable.cell(($i),3).range.text = $Endpoint
-    $NGCTable.cell(($i),4).range.Bold = 0
+    $VPNTable.cell(($i),3).range.text = $Endpoint
+    $VPNTable.cell(($i),4).range.Bold = 0
     $Parts = $NGC.LocalNetworkGateway2.id.Split("/")
     $Endpoint = $Parts[8]
-    $NGCTable.cell(($i),4).range.text = $Endpoint
-    $NGCTable.cell(($i),5).range.Bold = 0
-    $NGCTable.cell(($i),5).range.text = $NGC.ConnectionStatus
-    $NGCTable.cell(($i),6).range.Bold = 0
+    $VPNTable.cell(($i),4).range.text = $Endpoint
+    $VPNTable.cell(($i),5).range.Bold = 0
+    $VPNTable.cell(($i),5).range.text = $NGC.ConnectionStatus
+    $VPNTable.cell(($i),6).range.Bold = 0
     $DataGB = $NGC.EgressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $NGCTable.cell(($i),6).range.text = $DataGB.ToString()
-    $NGCTable.cell(($i),7).range.Bold = 0
+    $VPNTable.cell(($i),6).range.text = $DataGB.ToString()
+    $VPNTable.cell(($i),7).range.Bold = 0
     $DataGB = $NGC.IngressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $NGCTable.cell(($i),7).range.text = $DataGB.ToString()
-$i++
+    $VPNTable.cell(($i),7).range.text = $DataGB.ToString()
+    $i++
 }
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
@@ -578,9 +571,8 @@ $LocalGatewayArray = $LocalGatewayArray | Sort-Object Name
 ########
 ######## Create a table for VPN LocalGateways
 ########
-$LocalGatewayTable = $Selection.Tables.add($Word.Selection.Range, $LocalGatewayArray.Count + 1, 4,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent)
+$LocalGatewayTable = $Selection.Tables.add($Word.Selection.Range, $LocalGatewayArray.Count + 1, 4)
+$LocalGatewayTable.AllowAutoFit = $true
 
 $LocalGatewayTable.Style = $MediumShading1
 $LocalGatewayTable.Cell(1,1).Range.Text = "Name"
@@ -621,9 +613,8 @@ $AllPublicIPs = Get-AzPublicIpAddress | Sort-Object Name
 ########
 ######## Create a table for Public IP addresses
 ########
-$AllPublicIPTable = $Selection.Tables.add($Word.Selection.Range, $AllPublicIPs.Count + 1, 4,
-[Microsoft.Office.Interop.Word.WdDefaultTableBehavior]::wdWord9TableBehavior,
-[Microsoft.Office.Interop.Word.WdAutoFitBehavior]::wdAutoFitContent)
+$AllPublicIPTable = $Selection.Tables.add($Word.Selection.Range, $AllPublicIPs.Count + 1, 4)
+$AllPublicIPTable.AllowAutoFit = $true
 
 $AllPublicIPTable.Style = $MediumShading1
 $AllPublicIPTable.Cell(1,1).Range.Text = "Name"
@@ -635,8 +626,6 @@ $AllPublicIPTable.Cell(1,4).Range.Text = "Usedby"
 $i=2
 Write-Host "Creating Public IP table"
 Foreach ($PublicIP in $AllPublicIPs) {
-
-
     $AllPublicIPTable.cell(($i),1).range.Bold = 0
     $AllPublicIPTable.cell(($i),1).range.text = $PublicIP.Name
     $AllPublicIPTable.cell(($i),2).range.Bold = 0
@@ -670,4 +659,4 @@ $null = [System.Runtime.InteropServices.Marshal]::ReleaseComObject([System.__Com
 [gc]::Collect()
 [gc]::WaitForPendingFinalizers()
 Remove-Variable word 
-Write-Host "Script end"
+Write-Host "Script end."
