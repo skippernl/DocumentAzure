@@ -70,6 +70,8 @@ $Report = "$ReportPath\$Customer-Azure.docx"
 $Word = New-Object -ComObject Word.Application
 $Word.Visible = $false
 $Document = $Word.Documents.Add()
+#Switch to landscape
+$Document.PageSetup.Orientation = 1
 $Selection = $Word.Selection
 Write-Host "Getting Word information."
 $ALLStyles = $document.Styles | Select-Object NameLocal 
@@ -106,9 +108,9 @@ Write-Host "Getting All Azure Resources"
 $ALLAzureResources = Get-AzResource
 
 Write-Host "Getting VM's"
-$VMs = Get-AzVM | Sort-Object Name
+$VMs = Get-AzVM -Status | Sort-Object Name
 
-$VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 5)
+$VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 6)
 $VMTable.AllowAutoFit = $true
 
 $VMTable.Style = $MediumShading1
@@ -117,9 +119,10 @@ $VMTable.Cell(1,2).Range.Text = "Computer Name"
 $VMTable.Cell(1,3).Range.Text = "VM Size"
 $VMTable.Cell(1,4).Range.Text = "Resource Group Name"
 $VMTable.Cell(1,5).Range.Text = "Network Interface"
+$VMTable.Cell(1,6).Range.Text = "Status"
 
 ## Values
-$i=2
+$row=2
 Write-Host "Creating VM table"
 Foreach ($VM in $VMs) {
 
@@ -127,9 +130,9 @@ Foreach ($VM in $VMs) {
         $Parts = $VMName.Split("/")
         $NICLabel = $PArts[8]
 
-    $VMTable.cell(($i),1).range.Bold = 0
-    $VMTable.cell(($i),1).range.text = $VM.Name
-    $VMTable.cell(($i),2).range.Bold = 0
+    $VMTable.cell(($row),1).range.Bold = 0
+    $VMTable.cell(($row),1).range.text = $VM.Name
+    $VMTable.cell(($row),2).range.Bold = 0
     if ($null -eq $VM.OSProfile.ComputerName) {
         #https://docs.microsoft.com/en-us/troubleshoot/azure/virtual-machines/computer-names-missing-blank
         $VirtualMachineName = "(" + $VM.Name + ")"
@@ -137,15 +140,16 @@ Foreach ($VM in $VMs) {
     else {
         $VirtualMachineName = $VM.OSProfile.ComputerName
     }
-    $VMTable.cell(($i),2).range.text = $VirtualMachineName
-    $VMTable.cell(($i),3).range.Bold = 0
-    $VMTable.cell(($i),3).range.text = $VM.HardwareProfile.VmSize
-    $VMTable.cell(($i),4).range.Bold = 0
-    $VMTable.cell(($i),4).range.text = $VM.ResourceGroupName
-    $VMTable.cell(($i),5).range.Bold = 0
-    $VMTable.cell(($i),5).range.text = $NICLabel
-
-$i++
+    $VMTable.cell(($row),2).range.text = $VirtualMachineName
+    $VMTable.cell(($row),3).range.Bold = 0
+    $VMTable.cell(($row),3).range.text = $VM.HardwareProfile.VmSize
+    $VMTable.cell(($row),4).range.Bold = 0
+    $VMTable.cell(($row),4).range.text = $VM.ResourceGroupName
+    $VMTable.cell(($row),5).range.Bold = 0
+    $VMTable.cell(($row),5).range.text = $NICLabel
+    $VMTable.cell(($row),6).range.Bold = 0
+    $VMTable.cell(($row),6).range.text = $VM.Powerstate
+    $row++
 }
 
 
@@ -170,7 +174,7 @@ $DiskTable.Cell(1,5).Range.Text = "Resource Group Name"
 $DiskTable.Cell(1,6).Range.Text = "DiskSizeGB"
 
 ## Values
-$i=2
+$row=2
 Write-Host "Creating Disk table"
 Foreach ($Disk in $Disks) {
 
@@ -183,20 +187,20 @@ Foreach ($Disk in $Disks) {
             $Server = $Parts[8]
         }
 
-    $DiskTable.cell(($i),1).range.Bold = 0
-    $DiskTable.cell(($i),1).range.text = $Disk.Name
-    $DiskTable.cell(($i),2).range.Bold = 0
-    $DiskTable.cell(($i),2).range.text = $Server
-    $DiskTable.cell(($i),3).range.Bold = 0
-    $DiskTable.cell(($i),3).range.text = $Disk.DiskIOPSReadWrite.ToString()
-    $DiskTable.cell(($i),4).range.Bold = 0
-    $DiskTable.cell(($i),4).range.text = $Disk.DiskMBpsReadWrite.ToString()
-    $DiskTable.cell(($i),5).range.Bold = 0
-    $DiskTable.cell(($i),5).range.text = $Disk.ResourceGroupName
-    $DiskTable.cell(($i),6).range.Bold = 0
-    $DiskTable.cell(($i),6).range.text = $Disk.DiskSizeGB.ToString()
+    $DiskTable.cell(($row),1).range.Bold = 0
+    $DiskTable.cell(($row),1).range.text = $Disk.Name
+    $DiskTable.cell(($row),2).range.Bold = 0
+    $DiskTable.cell(($row),2).range.text = $Server
+    $DiskTable.cell(($row),3).range.Bold = 0
+    $DiskTable.cell(($row),3).range.text = $Disk.DiskIOPSReadWrite.ToString()
+    $DiskTable.cell(($row),4).range.Bold = 0
+    $DiskTable.cell(($row),4).range.text = $Disk.DiskMBpsReadWrite.ToString()
+    $DiskTable.cell(($row),5).range.Bold = 0
+    $DiskTable.cell(($row),5).range.text = $Disk.ResourceGroupName
+    $DiskTable.cell(($row),6).range.Bold = 0
+    $DiskTable.cell(($row),6).range.text = $Disk.DiskSizeGB.ToString()
 
-$i++
+$row++
 }
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
@@ -225,7 +229,7 @@ $NICTable.Cell(1,6).Range.Text = "Private IP Address"
 $NICTable.Cell(1,7).Range.Text = "Private IP Allocation Method"
 
 ## Write NICs to NIC table 
-$i=2
+$row=2
 
 Write-Host "Creating NIC table"
 Foreach ($NIC in $NICs) {
@@ -247,23 +251,23 @@ Else
         $VNETNAME = $PArts[8]
         $SUBNETNAME = $PArts[10]
 
-    $NICTable.cell(($i),1).range.Bold = 0
-    $NICTable.cell(($i),1).range.text = $VMLabel
-    $NICTable.cell(($i),2).range.Bold = 0
-    $NICTable.cell(($i),2).range.text = $NIC.Name
-    $NICTable.cell(($i),3).range.Bold = 0
-    $NICTable.cell(($i),3).range.text = $NIC.ResourceGroupName
-    $NICTable.cell(($i),4).range.Bold = 0
-    $NICTable.cell(($i),4).range.text = $VNETNAME 
-    $NICTable.cell(($i),5).range.Bold = 0
-    $NICTable.cell(($i),5).range.text = $SUBNETNAME
-    $NICTable.cell(($i),6).range.Bold = 0   
-    $NICTable.cell(($i),6).range.text = $NIC.IPconfigurations.PrivateIpAddress
-    $NICTable.cell(($i),7).range.Bold = 0
-    $NICTable.cell(($i),7).range.text = $NIC.IPconfigurations.PrivateIpAllocationMethod
+    $NICTable.cell(($row),1).range.Bold = 0
+    $NICTable.cell(($row),1).range.text = $VMLabel
+    $NICTable.cell(($row),2).range.Bold = 0
+    $NICTable.cell(($row),2).range.text = $NIC.Name
+    $NICTable.cell(($row),3).range.Bold = 0
+    $NICTable.cell(($row),3).range.text = $NIC.ResourceGroupName
+    $NICTable.cell(($row),4).range.Bold = 0
+    $NICTable.cell(($row),4).range.text = $VNETNAME 
+    $NICTable.cell(($row),5).range.Bold = 0
+    $NICTable.cell(($row),5).range.text = $SUBNETNAME
+    $NICTable.cell(($row),6).range.Bold = 0   
+    $NICTable.cell(($row),6).range.text = $NIC.IPconfigurations.PrivateIpAddress
+    $NICTable.cell(($row),7).range.Bold = 0
+    $NICTable.cell(($row),7).range.text = $NIC.IPconfigurations.PrivateIpAllocationMethod
 
 
-$i++
+$row++
 }
 
 $Word.Selection.Start= $Document.Content.End
@@ -287,23 +291,23 @@ $ReservationTable.Cell(1,4).Range.Text = "Start"
 $ReservationTable.Cell(1,5).Range.Text = "Term"
 $ReservationTable.Cell(1,6).Range.Text = "End"
 
-$i=2
+$row=2
 
 Write-Host "Creating Reservation table"
 Foreach ($ReservationOrder in $ALLReservationOrders) {
     $Reservation = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
-    $ReservationTable.cell(($i),1).range.Bold = 0
-    $ReservationTable.cell(($i),1).range.text = $Reservation.DisplayName
+    $ReservationTable.cell(($row),1).range.Bold = 0
+    $ReservationTable.cell(($row),1).range.text = $Reservation.DisplayName
     $StartTime = $Reservation.EffectiveDateTime
-    $ReservationTable.cell(($i),2).range.Bold = 0
-    $ReservationTable.cell(($i),2).range.text = $Reservation.Sku
-    $ReservationTable.cell(($i),3).range.Bold = 0
-    $ReservationTable.cell(($i),3).range.text = $Reservation.Quantity
-    $ReservationTable.cell(($i),4).range.Bold = 0
-    $ReservationTable.cell(($i),4).range.text = $StartTime.ToString()
+    $ReservationTable.cell(($row),2).range.Bold = 0
+    $ReservationTable.cell(($row),2).range.text = $Reservation.Sku
+    $ReservationTable.cell(($row),3).range.Bold = 0
+    $ReservationTable.cell(($row),3).range.text = $Reservation.Quantity
+    $ReservationTable.cell(($row),4).range.Bold = 0
+    $ReservationTable.cell(($row),4).range.text = $StartTime.ToString()
     $Term = $ReservationOrder.Term
-    $ReservationTable.cell(($i),5).range.Bold = 0
-    $ReservationTable.cell(($i),5).range.text = $Term
+    $ReservationTable.cell(($row),5).range.Bold = 0
+    $ReservationTable.cell(($row),5).range.text = $Term
     $Duration = $Term.substring(1,1)
     $LastChar = $Term.substring(2,1)
     #Using switch to be flexible
@@ -312,9 +316,9 @@ Foreach ($ReservationOrder in $ALLReservationOrders) {
             $EndTime = $StartTime.AddYears($Duration)
         }
     }
-    $ReservationTable.cell(($i),6).range.Bold = 0
-    $ReservationTable.cell(($i),6).range.text = $EndTime.ToString()
-    $i++
+    $ReservationTable.cell(($row),6).range.Bold = 0
+    $ReservationTable.cell(($row),6).range.text = $EndTime.ToString()
+    $row++
 }
 
 $Word.Selection.Start= $Document.Content.End
@@ -340,7 +344,7 @@ $NSGTable.Cell(1,3).Range.Text = "Network Interfaces"
 $NSGTable.Cell(1,4).Range.Text = "Subnets"
 
 ## Write NICs to NIC table 
-$i=2
+$row=2
 
 Write-Host "Creating NSG table"
 Foreach ($NSG in $NSGs) {
@@ -368,16 +372,16 @@ Else
       }
 
 
-    $NSGTable.cell(($i),1).range.Bold = 0
-    $NSGTable.cell(($i),1).range.text = $NSG.Name
-    $NSGTable.cell(($i),2).range.Bold = 0
-    $NSGTable.cell(($i),2).range.text = $NSG.ResourceGroupName
-    $NSGTable.cell(($i),3).range.Bold = 0
-    $NSGTable.cell(($i),3).range.text = $NICLabel
-    $NSGTable.cell(($i),4).range.Bold = 0
-    $NSGTable.cell(($i),4).range.text = $SUBNETLabel
+    $NSGTable.cell(($row),1).range.Bold = 0
+    $NSGTable.cell(($row),1).range.text = $NSG.Name
+    $NSGTable.cell(($row),2).range.Bold = 0
+    $NSGTable.cell(($row),2).range.text = $NSG.ResourceGroupName
+    $NSGTable.cell(($row),3).range.Bold = 0
+    $NSGTable.cell(($row),3).range.text = $NICLabel
+    $NSGTable.cell(($row),4).range.Bold = 0
+    $NSGTable.cell(($row),4).range.text = $SUBNETLabel
 
-$i++
+$row++
 }
 
 $Word.Selection.Start= $Document.Content.End
@@ -387,9 +391,6 @@ $Selection.TypeParagraph()
 ######## Create a table for each NSG
 ########
 
-
-### Get all NSGs
-#$NSGs = Get-AzNetworkSecurityGroup
 Write-Host "Creating Rule table"
 ForEach ($NSG in $NSGs) {
 
@@ -398,101 +399,74 @@ ForEach ($NSG in $NSGs) {
     $Selection.TypeText($NSG.Name)
     $Selection.TypeParagraph()
 
-		$NSGRulesCustom = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG | Sort-Object Name
-		$NSGRulesDefault = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG -DefaultRules | Sort-Object Name
-		$NSGRuleCount = $NSGRulesCustom.Count + $NSGRulesDefault.Count
-        ### Add a table for each NSG, the NSg has custom rules
-        $NSGRuleTable = $Selection.Tables.add($Word.Selection.Range, $NSGRuleCount + 1, 9)
-        $NSGRuleTable.AllowAutoFit = $true
+	$NSGRulesCustom = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG | Sort-Object Name
+	$NSGRulesDefault = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG -DefaultRules | Sort-Object Name
+	$NSGRuleCount = $NSGRulesCustom.Count + $NSGRulesDefault.Count
+    ### Add a table for each NSG, the NSg has custom rules
+    $NSGRuleTable = $Selection.Tables.add($Word.Selection.Range, $NSGRuleCount + 1, 9)
+    $NSGRuleTable.AllowAutoFit = $true
+    $NSGRuleTable.Style = $MediumShading1
+    $NSGRuleTable.Cell(1,1).Range.Text = "Rule Name"
+    $NSGRuleTable.Cell(1,2).Range.Text = "Protocol"
+    $NSGRuleTable.Cell(1,3).Range.Text = "Source Port Range"
+    $NSGRuleTable.Cell(1,4).Range.Text = "Destination Port Range"
+    $NSGRuleTable.Cell(1,5).Range.Text = "Source Address Prefix"
+    $NSGRuleTable.Cell(1,6).Range.Text = "Destination Address Prefix"
+    $NSGRuleTable.Cell(1,7).Range.Text = "Access"
+    $NSGRuleTable.Cell(1,8).Range.Text = "Priority"
+    $NSGRuleTable.Cell(1,9).Range.Text = "Direction"
+    $row = 2
+    ForEach ($NSGRULE in $NSGRulesCustom) {
+        $NSGRuleTable.cell(($row),1).range.Bold = 0
+        $NSGRuleTable.cell(($row),1).range.text = $NSGRule.Name
+        $NSGRuleTable.cell(($row),2).range.Bold = 0
+        $NSGRuleTable.cell(($row),2).range.text = $NSGRule.Protocol
+        $NSGRuleTable.cell(($row),3).range.Bold = 0
+        $NSGRuleTable.cell(($row),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
+        $NSGRuleTable.cell(($row),4).range.Bold = 0
+        $NSGRuleTable.cell(($row),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
+        $NSGRuleTable.cell(($row),5).range.Bold = 0
+        $NSGRuleTable.cell(($row),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
+        $NSGRuleTable.cell(($row),6).range.Bold = 0
+        $NSGRuleTable.cell(($row),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
+        $NSGRuleTable.cell(($row),7).range.Bold = 0
+        $NSGRuleTable.cell(($row),7).range.text = $NSGRule.Access
+        $NSGRuleTable.cell(($row),8).range.Bold = 0
+        $NSGRuleTable.cell(($row),8).range.text = [string]$NSGRule.Priority
+        $NSGRuleTable.cell(($row),9).range.Bold = 0
+        $NSGRuleTable.cell(($row),9).range.text = $NSGRule.Direction
+        $row++
+    }
 
-        $NSGRuleTable.Style = $MediumShading1
-        $NSGRuleTable.Cell(1,1).Range.Text = "Rule Name"
-        $NSGRuleTable.Cell(1,2).Range.Text = "Protocol"
-        $NSGRuleTable.Cell(1,3).Range.Text = "Source Port Range"
-        $NSGRuleTable.Cell(1,4).Range.Text = "Destination Port Range"
-        $NSGRuleTable.Cell(1,5).Range.Text = "Source Address Prefix"
-        $NSGRuleTable.Cell(1,6).Range.Text = "Destination Address Prefix"
-        $NSGRuleTable.Cell(1,7).Range.Text = "Access"
-        $NSGRuleTable.Cell(1,8).Range.Text = "Priority"
-        $NSGRuleTable.Cell(1,9).Range.Text = "Direction"
+    ForEach ($NSGRULE in $NSGRulesDefault) {
+        $NSGRuleTable.cell(($row),1).range.Bold = 0
+        $NSGRuleTable.cell(($row),1).range.text = $NSGRule.Name
+        $NSGRuleTable.cell(($row),2).range.Bold = 0
+        $NSGRuleTable.cell(($row),2).range.text = $NSGRule.Protocol
+        $NSGRuleTable.cell(($row),3).range.Bold = 0
+        $NSGRuleTable.cell(($row),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
+        $NSGRuleTable.cell(($row),4).range.Bold = 0
+        $NSGRuleTable.cell(($row),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
+        $NSGRuleTable.cell(($row),5).range.Bold = 0
+        $NSGRuleTable.cell(($row),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
+        $NSGRuleTable.cell(($row),6).range.Bold = 0
+        $NSGRuleTable.cell(($row),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
+        $NSGRuleTable.cell(($row),7).range.Bold = 0
+        $NSGRuleTable.cell(($row),7).range.text = $NSGRule.Access
+        $NSGRuleTable.cell(($row),8).range.Bold = 0
+        $NSGRuleTable.cell(($row),8).range.text = [string]$NSGRule.Priority
+        $NSGRuleTable.cell(($row),9).range.Bold = 0
+        $NSGRuleTable.cell(($row),9).range.text = $NSGRule.Direction
+        $row++
+    }
 
+    ### Close the NSG table
+    $Word.Selection.Start= $Document.Content.End
+    $Selection.TypeParagraph()
 
-        ### Get all custom Security Rules in the NSG
-        #$NSGRules = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG
-        $i = 2
+}
 
-        ForEach ($NSGRULE in $NSGRulesCustom) {
-                $NSGRuleTable.cell(($i),1).range.Bold = 0
-                $NSGRuleTable.cell(($i),1).range.text = $NSGRule.Name
-                $NSGRuleTable.cell(($i),2).range.Bold = 0
-                $NSGRuleTable.cell(($i),2).range.text = $NSGRule.Protocol
-
-                $NSGRuleTable.cell(($i),3).range.Bold = 0
-                $NSGRuleTable.cell(($i),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
-
-                $NSGRuleTable.cell(($i),4).range.Bold = 0
-                $NSGRuleTable.cell(($i),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
- 
-                $NSGRuleTable.cell(($i),5).range.Bold = 0
-                $NSGRuleTable.cell(($i),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
-
-                $NSGRuleTable.cell(($i),6).range.Bold = 0
-                $NSGRuleTable.cell(($i),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
-
-                $NSGRuleTable.cell(($i),7).range.Bold = 0
-                $NSGRuleTable.cell(($i),7).range.text = $NSGRule.Access
-
-                $NSGRuleTable.cell(($i),8).range.Bold = 0
-                $NSGRuleTable.cell(($i),8).range.text = [string]$NSGRule.Priority
-
-                $NSGRuleTable.cell(($i),9).range.Bold = 0
-                $NSGRuleTable.cell(($i),9).range.text = $NSGRule.Direction
-
-                $i++
-            }
-
-             ### Get all default Security Rules in the NSG
-        #$NSGRules = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG -DefaultRules
-        ForEach ($NSGRULE in $NSGRulesDefault) {
-                $NSGRuleTable.cell(($i),1).range.Bold = 0
-                $NSGRuleTable.cell(($i),1).range.text = $NSGRule.Name
-                $NSGRuleTable.cell(($i),2).range.Bold = 0
-                $NSGRuleTable.cell(($i),2).range.text = $NSGRule.Protocol
-
-                $NSGRuleTable.cell(($i),3).range.Bold = 0
-                $NSGRuleTable.cell(($i),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
-
-                $NSGRuleTable.cell(($i),4).range.Bold = 0
-                $NSGRuleTable.cell(($i),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
-
-                $NSGRuleTable.cell(($i),5).range.Bold = 0
-                $NSGRuleTable.cell(($i),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
-
-                $NSGRuleTable.cell(($i),6).range.Bold = 0
-                $NSGRuleTable.cell(($i),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
- 
-                $NSGRuleTable.cell(($i),7).range.Bold = 0
-                $NSGRuleTable.cell(($i),7).range.text = $NSGRule.Access
-
-                $NSGRuleTable.cell(($i),8).range.Bold = 0
-                $NSGRuleTable.cell(($i),8).range.text = [string]$NSGRule.Priority
-
-                $NSGRuleTable.cell(($i),9).range.Bold = 0
-                $NSGRuleTable.cell(($i),9).range.text = $NSGRule.Direction
-
-                $i++
-            }
-
-            ### Close the NSG table
-            $Word.Selection.Start= $Document.Content.End
-            $Selection.TypeParagraph()
-
-        }
-
-
-
-##Get al Azure VPN
-
+##Get al Azure VPNs
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
 $Selection.TypeText("VPN Information")
@@ -523,34 +497,34 @@ $VPNTable.Cell(1,6).Range.Text = "EgressBytesTransferredGB"
 $VPNTable.Cell(1,7).Range.Text = "IngressBytesTransferredGB"
 
 ## Values
-$i=2
+$row=2
 Write-Host "Creating VPN table"
 Foreach ($NGC in $NetworkGatewayConnections) {
-    $VPNTable.cell(($i),1).range.Bold = 0
-    $VPNTable.cell(($i),1).range.text = $NGC.Name
-    $VPNTable.cell(($i),2).range.Bold = 0
+    $VPNTable.cell(($row),1).range.Bold = 0
+    $VPNTable.cell(($row),1).range.text = $NGC.Name
+    $VPNTable.cell(($row),2).range.Bold = 0
     $ResourceGroupName = $NGC.ResourceGroupName
-    $VPNTable.cell(($i),2).range.text = $ResourceGroupName
+    $VPNTable.cell(($row),2).range.text = $ResourceGroupName
     if (!($LocalVPNEndpoints.Contains($ResourceGroupName))) { $LocalVPNEndpoints.Add($ResourceGroupName) | Out-Null }
-    $VPNTable.cell(($i),3).range.Bold = 0
+    $VPNTable.cell(($row),3).range.Bold = 0
     $Parts = $NGC.VirtualNetworkGateway1.id.Split("/")
     $Endpoint = $Parts[8]
-    $VPNTable.cell(($i),3).range.text = $Endpoint
-    $VPNTable.cell(($i),4).range.Bold = 0
+    $VPNTable.cell(($row),3).range.text = $Endpoint
+    $VPNTable.cell(($row),4).range.Bold = 0
     $Parts = $NGC.LocalNetworkGateway2.id.Split("/")
     $Endpoint = $Parts[8]
-    $VPNTable.cell(($i),4).range.text = $Endpoint
-    $VPNTable.cell(($i),5).range.Bold = 0
-    $VPNTable.cell(($i),5).range.text = $NGC.ConnectionStatus
-    $VPNTable.cell(($i),6).range.Bold = 0
+    $VPNTable.cell(($row),4).range.text = $Endpoint
+    $VPNTable.cell(($row),5).range.Bold = 0
+    $VPNTable.cell(($row),5).range.text = $NGC.ConnectionStatus
+    $VPNTable.cell(($row),6).range.Bold = 0
     $DataGB = $NGC.EgressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $VPNTable.cell(($i),6).range.text = $DataGB.ToString()
-    $VPNTable.cell(($i),7).range.Bold = 0
+    $VPNTable.cell(($row),6).range.text = $DataGB.ToString()
+    $VPNTable.cell(($row),7).range.Bold = 0
     $DataGB = $NGC.IngressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $VPNTable.cell(($i),7).range.text = $DataGB.ToString()
-    $i++
+    $VPNTable.cell(($row),7).range.text = $DataGB.ToString()
+    $row++
 }
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
@@ -581,26 +555,26 @@ $LocalGatewayTable.Cell(1,3).Range.Text = "GatewayIPAddress"
 $LocalGatewayTable.Cell(1,4).Range.Text = "LocalNetworkAddressSpace"
 
 ## Values
-$i=2
+$row=2
 Write-Host "Creating VPN LocalGateway table"
 Foreach ($LocalGateway in $LocalGatewayArray) {
 
 
-    $LocalGatewayTable.cell(($i),1).range.Bold = 0
-    $LocalGatewayTable.cell(($i),1).range.text = $LocalGateway.Name
-    $LocalGatewayTable.cell(($i),2).range.Bold = 0
-    $LocalGatewayTable.cell(($i),2).range.text = $LocalGateway.ResourceGroupName
-    $LocalGatewayTable.cell(($i),3).range.Bold = 0
-    $LocalGatewayTable.cell(($i),3).range.text = $LocalGateway.GatewayIpAddress
-    $LocalGatewayTable.cell(($i),4).range.Bold = 0
+    $LocalGatewayTable.cell(($row),1).range.Bold = 0
+    $LocalGatewayTable.cell(($row),1).range.text = $LocalGateway.Name
+    $LocalGatewayTable.cell(($row),2).range.Bold = 0
+    $LocalGatewayTable.cell(($row),2).range.text = $LocalGateway.ResourceGroupName
+    $LocalGatewayTable.cell(($row),3).range.Bold = 0
+    $LocalGatewayTable.cell(($row),3).range.text = $LocalGateway.GatewayIpAddress
+    $LocalGatewayTable.cell(($row),4).range.Bold = 0
     if ($LocalGateway.LocalNetworkAddressSpace.AddressPrefixes) {
         $LocalAddressSpace = ConvertArrayToLine $LocalGateway.LocalNetworkAddressSpace.AddressPrefixes
     }
     else {
         $LocalAddressSpace = "NOT defined"
     }
-    $LocalGatewayTable.cell(($i),4).range.text = $LocalAddressSpace
-    $i++
+    $LocalGatewayTable.cell(($row),4).range.text = $LocalAddressSpace
+    $row++
 }
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
@@ -623,16 +597,16 @@ $AllPublicIPTable.Cell(1,3).Range.Text = "IPAddress"
 $AllPublicIPTable.Cell(1,4).Range.Text = "PublicIpAllocationMethod"
 $AllPublicIPTable.Cell(1,4).Range.Text = "Usedby"
 ## Values
-$i=2
+$row=2
 Write-Host "Creating Public IP table"
 Foreach ($PublicIP in $AllPublicIPs) {
-    $AllPublicIPTable.cell(($i),1).range.Bold = 0
-    $AllPublicIPTable.cell(($i),1).range.text = $PublicIP.Name
-    $AllPublicIPTable.cell(($i),2).range.Bold = 0
-    $AllPublicIPTable.cell(($i),2).range.text = $PublicIP.ResourceGroupName
-    $AllPublicIPTable.cell(($i),3).range.Bold = 0
-    $AllPublicIPTable.cell(($i),3).range.text = $PublicIP.IpAddress
-    $AllPublicIPTable.cell(($i),4).range.Bold = 0
+    $AllPublicIPTable.cell(($row),1).range.Bold = 0
+    $AllPublicIPTable.cell(($row),1).range.text = $PublicIP.Name
+    $AllPublicIPTable.cell(($row),2).range.Bold = 0
+    $AllPublicIPTable.cell(($row),2).range.text = $PublicIP.ResourceGroupName
+    $AllPublicIPTable.cell(($row),3).range.Bold = 0
+    $AllPublicIPTable.cell(($row),3).range.text = $PublicIP.IpAddress
+    $AllPublicIPTable.cell(($row),4).range.Bold = 0
     if ($PublicIP.IpConfiguration.id) {
         $Parts = $PublicIP.IpConfiguration.id.Split("/")
         $Endpoint = $Parts[8]
@@ -640,8 +614,8 @@ Foreach ($PublicIP in $AllPublicIPs) {
     else {
         $Endpoint = "Unused"
     }
-    $AllPublicIPTable.cell(($i),4).range.text = $Endpoint
-    $i++
+    $AllPublicIPTable.cell(($row),4).range.text = $Endpoint
+    $row++
 }
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
