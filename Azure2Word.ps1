@@ -20,6 +20,11 @@ Connects to Azure powershell to get (virtual server) information
 Author: Xander Angenent (@XaAng70)
 Adapted and fixed errors by SkipperNL
 Idea: Anders Bengtsson http://contoso.se/blog/?p=4286
+The Word file generation part of the script is based upon the work done by:
+
+Carl Webster  | http://www.carlwebster.com | @CarlWebster
+Iain Brighton | http://virtualengine.co.uk | @IainBrighton
+Jeff Wouters  | http://www.jeffwouters.nl  | @JeffWouters
 
 Uses modules AZ and Az.Reservations
 Install-module -Name az
@@ -37,7 +42,6 @@ Param
     $TenantId,
     $SubscriptionId
 )
-#Get-AzVirtualNetworkGatewayConnection
 Function ConvertArrayToLine ($ConvertArray) {
 #This function converts an Array to a sinlge line of text)
 if ($ConvertArray) {
@@ -52,19 +56,28 @@ if ($ConvertArray) {
 
 }
 
-Write-Host "Script Started."
+$StartTime = get-date 
+Write-Output "Script Started."
 Connect-AzAccount | Out-Null
+if (!($?)) {
+    Write-Output "Error logging in to Azure."
+    Write-Output "Script stopped."
+    exit
+}
 if ($TenantId -and $SubscriptionId) {
     Select-AzSubscription -TenantId  $TenantId -SubscriptionId $SubscriptionId | Out-Null
     if (!($?)) {
-        Write-Host "Unable to find Tennant or Subscription."
-        Write-Host "Script stopped."
+        Write-Output "Unable to find Tennant or Subscription."
+        Write-Output "Script stopped."
         exit
     }
 }
+##Init Arrays and other default parameters
 $NetworkGatewayConnections = [System.Collections.ArrayList]@()
-$LocalVPNEndpoints = [System.Collections.ArrayList]@()
+$LocalEndPointResourceGroupNames = [System.Collections.ArrayList]@()
 $LocalGatewayArray = [System.Collections.ArrayList]@()
+$NumberOfBackupJobs = 0
+#End init
 $Report = "$ReportPath\$Customer-Azure.docx"
 # Creating the Word Object, set Word to not be visual and add document
 $Word = New-Object -ComObject Word.Application
@@ -73,7 +86,7 @@ $Document = $Word.Documents.Add()
 #Switch to landscape
 $Document.PageSetup.Orientation = 1
 $Selection = $Word.Selection
-Write-Host "Getting Word information."
+Write-Output "Getting Word information."
 $ALLStyles = $document.Styles | Select-Object NameLocal 
 $Title = $AllStyles[360].Namelocal
 $Heading1 = $AllStyles[149].Namelocal
@@ -104,10 +117,10 @@ $Selection.TypeParagraph()
 
 ## Get all VMs from Azure
 #Connect-AzAccount
-Write-Host "Getting All Azure Resources"
+Write-Output "Getting All Azure Resources"
 $ALLAzureResources = Get-AzResource
 
-Write-Host "Getting VM's"
+Write-Output "Getting VM's"
 $VMs = Get-AzVM -Status | Sort-Object Name
 
 $VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 6)
@@ -123,12 +136,12 @@ $VMTable.Cell(1,6).Range.Text = "Status"
 
 ## Values
 $row=2
-Write-Host "Creating VM table"
+Write-Output "Creating VM table"
 Foreach ($VM in $VMs) {
 
-        $VMName = $VM.NetworkProfile.NetworkInterfaces.ID
-        $Parts = $VMName.Split("/")
-        $NICLabel = $PArts[8]
+    $VMName = $VM.NetworkProfile.NetworkInterfaces.ID
+    $Parts = $VMName.Split("/")
+    $NICLabel = $PArts[8]
 
     $VMTable.cell(($row),1).range.Bold = 0
     $VMTable.cell(($row),1).range.text = $VM.Name
@@ -151,14 +164,12 @@ Foreach ($VM in $VMs) {
     $VMTable.cell(($row),6).range.text = $VM.Powerstate
     $row++
 }
-
-
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("Virtual Machine Disks")
 $Selection.TypeParagraph()
-Write-Host "Getting Disk information"
+Write-Output "Getting Disk information"
 $Disks = get-Azdisk | Sort-Object Name
 
 ## Add a table for Disks
@@ -175,7 +186,7 @@ $DiskTable.Cell(1,6).Range.Text = "DiskSizeGB"
 
 ## Values
 $row=2
-Write-Host "Creating Disk table"
+Write-Output "Creating Disk table"
 Foreach ($Disk in $Disks) {
 
         $DiskID = $Disk.ManagedBy
@@ -213,7 +224,7 @@ $Selection.Style = $Heading2
 $Selection.TypeText("Network Interfaces")
 $Selection.TypeParagraph()
 
-Write-Host "Getting Network interfaces"
+Write-Output "Getting Network interfaces"
 $NICs = Get-AzNetworkInterface | Sort-Object Name
 
 $NICTable = $Selection.Tables.add($Word.Selection.Range, $NICs.Count + 1, 7)
@@ -231,7 +242,7 @@ $NICTable.Cell(1,7).Range.Text = "Private IP Allocation Method"
 ## Write NICs to NIC table 
 $row=2
 
-Write-Host "Creating NIC table"
+Write-Output "Creating NIC table"
 Foreach ($NIC in $NICs) {
 
 ## Get connected VM, if there is one connected to the network interface
@@ -278,7 +289,7 @@ $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("Reservations")
 $Selection.TypeParagraph()
-Write-Host "Getting Reservations"
+Write-Output "Getting Reservations"
 $ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
 $ReservationTable = $Selection.Tables.add($Word.Selection.Range, $ALLReservationOrders.Count + 1, 6)
 $ReservationTable.AllowAutoFit = $true
@@ -293,7 +304,7 @@ $ReservationTable.Cell(1,6).Range.Text = "End"
 
 $row=2
 
-Write-Host "Creating Reservation table"
+Write-Output "Creating Reservation table"
 Foreach ($ReservationOrder in $ALLReservationOrders) {
     $Reservation = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
     $ReservationTable.cell(($row),1).range.Bold = 0
@@ -331,7 +342,7 @@ $Selection.InsertNewPage()
 $Selection.Style = $Heading1
 $Selection.TypeText("Network Security Groups")
 $Selection.TypeParagraph()
-Write-Host "Getting NSGs"
+Write-Output "Getting NSGs"
 $NSGs = Get-AzNetworkSecurityGroup | Sort-Object Name
 
 $NSGTable = $Selection.Tables.add($Word.Selection.Range, $NSGs.Count + 1, 4)
@@ -346,7 +357,7 @@ $NSGTable.Cell(1,4).Range.Text = "Subnets"
 ## Write NICs to NIC table 
 $row=2
 
-Write-Host "Creating NSG table"
+Write-Output "Creating NSG table"
 Foreach ($NSG in $NSGs) {
 
 ## Get connected NIC, if there is one connected 
@@ -391,7 +402,7 @@ $Selection.TypeParagraph()
 ######## Create a table for each NSG
 ########
 
-Write-Host "Creating Rule table"
+Write-Output "Creating Rule table"
 ForEach ($NSG in $NSGs) {
 
     ## Add Heading for each NSG
@@ -474,7 +485,7 @@ $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("VPN GatewayConnections")
 $Selection.TypeParagraph()
-Write-Host "Getting VPN GatewayConnections"
+Write-Output "Getting VPN GatewayConnections"
 $NetworkConnections = $ALLAzureResources | Where-Object {$_.ResourceType -eq "Microsoft.Network/connections" } | Sort-Object Name
 Foreach ($NetworkConnection in $NetworkConnections) {
     $NSG = Get-AzVirtualNetworkGatewayConnection -ResourceName $NetworkConnection.ResourceName -ResourceGroupName $NetworkConnection.ResourceGroupName
@@ -498,14 +509,14 @@ $VPNTable.Cell(1,7).Range.Text = "IngressBytesTransferredGB"
 
 ## Values
 $row=2
-Write-Host "Creating VPN table"
+Write-Output "Creating VPN table"
 Foreach ($NGC in $NetworkGatewayConnections) {
     $VPNTable.cell(($row),1).range.Bold = 0
     $VPNTable.cell(($row),1).range.text = $NGC.Name
     $VPNTable.cell(($row),2).range.Bold = 0
     $ResourceGroupName = $NGC.ResourceGroupName
     $VPNTable.cell(($row),2).range.text = $ResourceGroupName
-    if (!($LocalVPNEndpoints.Contains($ResourceGroupName))) { $LocalVPNEndpoints.Add($ResourceGroupName) | Out-Null }
+    if (!($LocalEndPointResourceGroupNames.Contains($ResourceGroupName))) { $LocalEndPointResourceGroupNames.Add($ResourceGroupName) | Out-Null }
     $VPNTable.cell(($row),3).range.Bold = 0
     $Parts = $NGC.VirtualNetworkGateway1.id.Split("/")
     $Endpoint = $Parts[8]
@@ -532,8 +543,8 @@ $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("VPN LocalGateways")
 $Selection.TypeParagraph()
-foreach ($LocalVPNEndpoint in $LocalVPNEndpoints) {
-    $LocalGateway = Get-AzLocalNetworkGateway -ResourceGroupName $LocalVPNEndpoint
+foreach ($LocalEndPointResourceGroupName in $LocalEndPointResourceGroupNames) {
+    $LocalGateway = Get-AzLocalNetworkGateway -ResourceGroupName $LocalEndPointResourceGroupName
     if ($LocalGateway -is [array]) {
         Foreach ($LocalGatewayMember in $LocalGateway) { $LocalGatewayArray.Add($LocalGatewayMember) | Out-Null }
     }
@@ -551,12 +562,12 @@ $LocalGatewayTable.AllowAutoFit = $true
 $LocalGatewayTable.Style = $MediumShading1
 $LocalGatewayTable.Cell(1,1).Range.Text = "Name"
 $LocalGatewayTable.Cell(1,2).Range.Text = "ResourceGroup"
-$LocalGatewayTable.Cell(1,3).Range.Text = "GatewayIPAddress"
+$LocalGatewayTable.Cell(1,3).Range.Text = "GatewayAddress"
 $LocalGatewayTable.Cell(1,4).Range.Text = "LocalNetworkAddressSpace"
 
 ## Values
 $row=2
-Write-Host "Creating VPN LocalGateway table"
+Write-Output "Creating VPN LocalGateway table"
 Foreach ($LocalGateway in $LocalGatewayArray) {
 
 
@@ -565,7 +576,16 @@ Foreach ($LocalGateway in $LocalGatewayArray) {
     $LocalGatewayTable.cell(($row),2).range.Bold = 0
     $LocalGatewayTable.cell(($row),2).range.text = $LocalGateway.ResourceGroupName
     $LocalGatewayTable.cell(($row),3).range.Bold = 0
-    $LocalGatewayTable.cell(($row),3).range.text = $LocalGateway.GatewayIpAddress
+    $Gateway = $LocalGateway.GatewayIpAddress
+    if (!($Gateway)) {
+        #There is no IP adrress -> Try FQDN
+        $Gateway = $LocalGateway.fqdn
+        if (!($Gateway)) {
+            #Also not found
+            $Gateway = "Unkown"
+        }
+    }
+    $LocalGatewayTable.cell(($row),3).range.text = $Gateway
     $LocalGatewayTable.cell(($row),4).range.Bold = 0
     if ($LocalGateway.LocalNetworkAddressSpace.AddressPrefixes) {
         $LocalAddressSpace = ConvertArrayToLine $LocalGateway.LocalNetworkAddressSpace.AddressPrefixes
@@ -598,7 +618,7 @@ $AllPublicIPTable.Cell(1,4).Range.Text = "PublicIpAllocationMethod"
 $AllPublicIPTable.Cell(1,4).Range.Text = "Usedby"
 ## Values
 $row=2
-Write-Host "Creating Public IP table"
+Write-Output "Creating Public IP table"
 Foreach ($PublicIP in $AllPublicIPs) {
     $AllPublicIPTable.cell(($row),1).range.Bold = 0
     $AllPublicIPTable.cell(($row),1).range.text = $PublicIP.Name
@@ -620,11 +640,78 @@ Foreach ($PublicIP in $AllPublicIPs) {
 $Word.Selection.Start= $Document.Content.End
 $Selection.TypeParagraph()
 
+
+#Adding recovery information
+$Selection.InsertNewPage()
+$Selection.Style = $Heading1
+$Selection.TypeText("Azure Backups")
+$Selection.TypeParagraph()
+$Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
+foreach ($Vault in $Vaults) {
+    $NumberOfBackupJobs += (Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | where-object { $_.Operation -eq "Backup" } ).Count
+}
+########
+######## Create a table the backupjobs found
+########
+$BackupTable = $Selection.Tables.add($Word.Selection.Range, $NumberOfBackupJobs + 1, 6)
+$BackupTable.AllowAutoFit = $true
+
+$BackupTable.Style = $MediumShading1
+$BackupTable.Cell(1,1).Range.Text = "RecoveryVault"
+$BackupTable.Cell(1,2).Range.Text = "Workloadname"
+$BackupTable.Cell(1,3).Range.Text = "Status"
+$BackupTable.Cell(1,4).Range.Text = "StartTime"
+$BackupTable.Cell(1,5).Range.Text = "EndTime"
+$BackupTable.Cell(1,6).Range.Text = "LatestRestorePoint"
+
+## Values
+$row=2
+#Get Only Restore points of the last week.
+$startDate = (Get-Date).AddDays(-7)
+$endDate = Get-Date
+Write-Output "Creating Backup job table"
+Foreach ($Vault in $Vaults) {
+    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | where-object { $_.Operation -eq "Backup" } | Sort-Object WorkloadName
+    foreach ($BackupJob in $BackupJobs) {
+        Write-Output "Getting restore points for $($BackupJob.WorkloadName)."
+        $namedContainer = Get-AzRecoveryServicesBackupContainer  -ContainerType $BackupJob.BackupManagementType -Status "Registered" -FriendlyName $BackupJob.workloadname.ToUpper() -VaultId $Vault.ID
+        $backupitem = Get-AzRecoveryServicesBackupItem -Container $namedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
+        $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+        if ($rp) {
+            $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+        }
+        else {
+            $LatestRestorePoint = "Unkown"
+        }
+        $BackupTable.cell(($row),1).range.Bold = 0
+        $BackupTable.cell(($row),1).range.text = $Vault.Name
+        $BackupTable.cell(($row),2).range.Bold = 0
+        $BackupTable.cell(($row),2).range.text = $BackupJob.WorkloadName
+        $BackupTable.cell(($row),3).range.Bold = 0
+        $BackupTable.cell(($row),3).range.text = $BackupJob.Status
+        $BackupTable.cell(($row),4).range.Bold = 0
+        $BackupTable.cell(($row),4).range.text = $BackupJob.StartTime.ToString()
+        $BackupTable.cell(($row),5).range.Bold = 0
+        if ($BackupJob.Status -eq "InProgress") {
+            $BackupJobEndTime = "-"
+        }
+        else {
+            $BackupJobEndTime = $BackupJob.EndTime.ToString()
+        }
+        $BackupTable.cell(($row),5).range.text = $BackupJobEndTime
+        $BackupTable.cell(($row),6).range.Bold = 0
+        $BackupTable.cell(($row),6).range.text = $LatestRestorePoint
+        $row++
+    }
+}
+$Word.Selection.Start= $Document.Content.End
+$Selection.TypeParagraph()
+
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
 
 # Save the document
-Write-Host "Creating file $Report."
+Write-Output "Creating file $Report."
 $Document.SaveAs([ref]$Report,[ref]$SaveFormat::wdFormatDocument)
 $word.Quit()
 
@@ -633,4 +720,8 @@ $null = [System.Runtime.InteropServices.Marshal]::ReleaseComObject([System.__Com
 [gc]::Collect()
 [gc]::WaitForPendingFinalizers()
 Remove-Variable word 
-Write-Host "Script end."
+$elapsedTime = $(get-date) - $startTime
+$Minutes = $elapsedTime.Minutes
+$Seconds = $elapsedTime.Seconds
+Write-Output "Script done in $Minutes Minute(s) and $Seconds Second(s)."
+Write-Output "Script end."
