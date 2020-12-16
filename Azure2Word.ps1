@@ -42,6 +42,256 @@ Param
     $TenantId,
     $SubscriptionId
 )
+<#
+.Synopsis
+	Add a table to a Microsoft Word document
+.DESCRIPTION
+	This Function adds a table to a Microsoft Word document from either an array of
+	Hashtables or an array of PSCustomObjects.
+
+	Using this Function is quicker than setting each table cell individually but can
+	only utilise the built-in MS Word table autoformats. Individual tables cells can
+	be altered after the table has been appended to the document (a table reference
+	is Returned).
+.EXAMPLE
+	AddWordTable -Hashtable $HashtableArray
+
+	This example adds table to the MS Word document, utilising all key/value pairs in
+	the array of hashtables. Column headers will display the key names as defined.
+	Note: the columns might not be displayed in the order that they were defined. To
+	ensure columns are displayed in the required order utilise the -Columns parameter.
+.EXAMPLE
+	AddWordTable -Hashtable $HashtableArray -List
+
+	This example adds table to the MS Word document, utilising all key/value pairs in
+	the array of hashtables. No column headers will be added, in a ListView format.
+	Note: the columns might not be displayed in the order that they were defined. To
+	ensure columns are displayed in the required order utilise the -Columns parameter.
+.EXAMPLE
+	AddWordTable -CustomObject $PSCustomObjectArray
+
+	This example adds table to the MS Word document, utilising all note property names
+	the array of PSCustomObjects. Column headers will display the note property names.
+	Note: the columns might not be displayed in the order that they were defined. To
+	ensure columns are displayed in the required order utilise the -Columns parameter.
+.EXAMPLE
+	AddWordTable -Hashtable $HashtableArray -Columns FirstName,LastName,EmailAddress
+
+	This example adds a table to the MS Word document, but only using the specified
+	key names: FirstName, LastName and EmailAddress. If other keys are present in the
+	array of Hashtables they will be ignored.
+.EXAMPLE
+	AddWordTable -CustomObject $PSCustomObjectArray -Columns FirstName,LastName,EmailAddress -Headers "First Name","Last Name","Email Address"
+
+	This example adds a table to the MS Word document, but only using the specified
+	PSCustomObject note properties: FirstName, LastName and EmailAddress. If other note
+	properties are present in the array of PSCustomObjects they will be ignored. The
+	display names for each specified column header has been overridden to display a
+	custom header. Note: the order of the header names must match the specified columns.
+#>
+Function AddWordTable
+{
+	[CmdletBinding()]
+	Param
+	(
+		# Array of Hashtable (including table headers)
+		[Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, ParameterSetName='Hashtable', Position=0)]
+		[ValidateNotNullOrEmpty()] [System.Collections.Hashtable[]] $Hashtable,
+		# Array of PSCustomObjects
+		[Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, ParameterSetName='CustomObject', Position=0)]
+		[ValidateNotNullOrEmpty()] [PSCustomObject[]] $CustomObject,
+		# Array of Hashtable key names or PSCustomObject property names to include, in display order.
+		# If not supplied then all Hashtable keys or all PSCustomObject properties will be displayed.
+		[Parameter(ValueFromPipelineByPropertyName=$true)] [AllowNull()] [string[]] $Columns = $null,
+		# Array of custom table header strings in display order.
+		[Parameter(ValueFromPipelineByPropertyName=$true)] [AllowNull()] [string[]] $Headers = $null,
+		# AutoFit table behavior.
+		[Parameter(ValueFromPipelineByPropertyName=$true)] [AllowNull()] [int] $AutoFit = $wdAutoFitContent,
+		# List view (no headers)
+		[Switch] $List,
+		# Grid lines
+		[Switch] $NoGridLines=$false,
+		# Built-in Word table formatting style constant
+		# Would recommend only $wdTableFormatContempory for normal usage (possibly $wdTableFormatList5 for List view)
+		[Parameter(ValueFromPipelineByPropertyName=$true)] [int] $Format = '-231'
+	)
+
+	Begin 
+	{
+		Write-Debug ("Using parameter set '{0}'" -f $PSCmdlet.ParameterSetName);
+		## Check if -Columns wasn't specified but -Headers were (saves some additional parameter sets!)
+		If(($null -eq $Columns) -and ($null -ne $Headers)) 
+		{
+			Write-Warning "No columns specified and therefore, specified headers will be ignored.";
+			$Columns = $null;
+		}
+		ElseIf(($null -ne $Columns) -and ($null -ne $Headers)) 
+		{
+			## Check if number of specified -Columns matches number of specified -Headers
+			If($Columns.Length -ne $Headers.Length) 
+			{
+				Write-Error "The specified number of columns does not match the specified number of headers.";
+			}
+		} ## end ElseIf
+	} ## end Begin
+
+	Process
+	{
+		## Build the Word table data string to be converted to a range and then a table later.
+        [System.Text.StringBuilder] $WordRangeString = New-Object System.Text.StringBuilder;
+
+		Switch ($PSCmdlet.ParameterSetName) 
+		{
+			'CustomObject' 
+			{
+				If($null -eq $Columns) 
+				{
+					## Build the available columns from all availble PSCustomObject note properties
+					[string[]] $Columns = @();
+					## Add each NoteProperty name to the array
+					ForEach($Property in ($CustomObject | Get-Member -MemberType NoteProperty)) 
+					{ 
+						$Columns += $Property.Name; 
+					}
+				}
+
+				## Add the table headers from -Headers or -Columns (except when in -List(view)
+				If(-not $List) 
+				{
+					Write-Debug ("$(Get-Date): `t`tBuilding table headers");
+					If($null -ne $Headers) 
+					{
+                        $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Headers));
+					}
+					Else 
+					{ 
+                        $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Columns));
+					}
+				}
+
+				## Iterate through each PSCustomObject
+				Write-Debug ("$(Get-Date): `t`tBuilding table rows");
+				ForEach($Object in $CustomObject) 
+				{
+					$OrderedValues = @();
+					## Add each row item in the specified order
+					ForEach($Column in $Columns) 
+					{ 
+						$OrderedValues += $Object.$Column; 
+					}
+					## Use the ordered list to add each column in specified order
+                    $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $OrderedValues));
+				} ## end ForEach
+				Write-Debug ("$(Get-Date): `t`t`tAdded '{0}' table rows" -f ($CustomObject.Count));
+			} ## end CustomObject
+
+			Default 
+			{   ## Hashtable
+				If($null -eq $Columns) 
+				{
+					## Build the available columns from all available hashtable keys. Hopefully
+					## all Hashtables have the same keys (they should for a table).
+					$Columns = $Hashtable[0].Keys;
+				}
+
+				## Add the table headers from -Headers or -Columns (except when in -List(view)
+				If(-not $List) 
+				{
+					Write-Debug ("$(Get-Date): `t`tBuilding table headers");
+					If($null -ne $Headers) 
+					{ 
+                        $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Headers));
+					}
+					Else 
+					{
+                        $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $Columns));
+					}
+				}
+                
+				## Iterate through each Hashtable
+				Write-Debug ("$(Get-Date): `t`tBuilding table rows");
+				ForEach($Hash in $Hashtable) 
+				{
+					$OrderedValues = @();
+					## Add each row item in the specified order
+					ForEach($Column in $Columns) 
+					{ 
+						$OrderedValues += $Hash.$Column; 
+					}
+					## Use the ordered list to add each column in specified order
+                    $WordRangeString.AppendFormat("{0}`n", [string]::Join("`t", $OrderedValues));
+				} ## end ForEach
+
+				Write-Debug ("$(Get-Date): `t`t`tAdded '{0}' table rows" -f $Hashtable.Count);
+			} ## end default
+		} ## end Switch
+
+		## Create a MS Word range and set its text to our tab-delimited, concatenated string
+		Write-Debug ("$(Get-Date): `t`tBuilding table range");
+		$WordRange = $Document.Application.Selection.Range;
+		$WordRange.Text = $WordRangeString.ToString();
+
+		## Create hash table of named arguments to pass to the ConvertToTable method
+		$ConvertToTableArguments = @{ Separator = [Microsoft.Office.Interop.Word.WdTableFieldSeparator]::wdSeparateByTabs; }
+
+		## Negative built-in styles are not supported by the ConvertToTable method
+		If($Format -ge 0) 
+		{
+			$ConvertToTableArguments.Add("Format", $Format);
+			$ConvertToTableArguments.Add("ApplyBorders", $true);
+			$ConvertToTableArguments.Add("ApplyShading", $true);
+			$ConvertToTableArguments.Add("ApplyFont", $true);
+			$ConvertToTableArguments.Add("ApplyColor", $true);
+			If(!$List) 
+			{ 
+				$ConvertToTableArguments.Add("ApplyHeadingRows", $true); 
+			}
+			$ConvertToTableArguments.Add("ApplyLastRow", $true);
+			$ConvertToTableArguments.Add("ApplyFirstColumn", $true);
+			$ConvertToTableArguments.Add("ApplyLastColumn", $true);
+		}
+
+		## Invoke ConvertToTable method - with named arguments - to convert Word range to a table
+		## See http://msdn.microsoft.com/en-us/library/office/aa171893(v=office.11).aspx
+		Write-Debug ("$(Get-Date): `t`tConverting range to table");
+		## Store the table reference just in case we need to set alternate row coloring
+		$WordTable = $WordRange.GetType().InvokeMember(
+			"ConvertToTable",                               # Method name
+			[System.Reflection.BindingFlags]::InvokeMethod, # Flags
+			$null,                                          # Binder
+			$WordRange,                                     # Target (self!)
+			([Object[]]($ConvertToTableArguments.Values)),  ## Named argument values
+			$null,                                          # Modifiers
+			$null,                                          # Culture
+			([String[]]($ConvertToTableArguments.Keys))     ## Named argument names
+		);
+
+		## Implement grid lines (will wipe out any existing formatting)
+		If($Format -lt 0) 
+		{
+			Write-Debug ("$(Get-Date): `t`tSetting table format");
+			$WordTable.Style = $Format;
+		}
+
+		## Set the table autofit behavior
+		If($AutoFit -ne -1) 
+		{ 
+			$WordTable.AutoFitBehavior($AutoFit); 
+		}
+
+		#the next line causes the heading row to flow across page breaks
+		$WordTable.Rows.First.Headingformat = $wdHeadingFormatTrue;
+
+		If(!$NoGridLines) 
+		{
+			$WordTable.Borders.InsideLineStyle = $wdLineStyleSingle;
+			$WordTable.Borders.OutsideLineStyle = $wdLineStyleSingle;
+		}
+
+		Return $WordTable;
+
+	} ## end Process
+}
 Function ConvertArrayToLine ($ConvertArray) {
 #This function converts an Array to a sinlge line of text)
 if ($ConvertArray) {
@@ -55,8 +305,16 @@ if ($ConvertArray) {
     return $TextLine
 
 }
+Function FindWordDocumentEnd
+{
+	#Return focus to main document    
+	$Document.ActiveWindow.ActivePane.view.SeekView = $wdSeekMainDocument
+	#move to the end of the current document
+	$Selection.EndKey($wdStory,$wdMove) | Out-Null
+}
 
-$StartTime = get-date 
+
+$StartScriptTime = get-date 
 Write-Output "Script Started."
 Connect-AzAccount | Out-Null
 if (!($?)) {
@@ -77,6 +335,22 @@ $NetworkGatewayConnections = [System.Collections.ArrayList]@()
 $LocalEndPointResourceGroupNames = [System.Collections.ArrayList]@()
 $LocalGatewayArray = [System.Collections.ArrayList]@()
 $NumberOfBackupJobs = 0
+[int]$wdMove = 0
+[int]$wdSeekMainDocument = 0
+#[int]$wdSeekPrimaryFooter = 4
+[int]$wdStory = 6
+[long]$wdColorRed = 255
+#http://msdn.microsoft.com/en-us/library/office/ff844856%28v=office.15%29.aspx
+#[int]$wdAutoFitFixed = 0
+[int]$wdAutoFitContent = 1
+#[int]$wdAutoFitWindow = 2
+#[int]$wdLineStyleNone = 0
+[int]$wdLineStyleSingle = 1
+#Work-around for Powershell 7 not loading assembly files 
+$RootAssemblyPathWord = $env:Systemroot + "\assembly\GAC_MSIL\Microsoft.Office.Interop.Word"
+$WordAssemblyDirectory = Get-ChildItem -Path $RootAssemblyPathWord -Directory | Select-Object -First 1
+$WordAssemblyFile = $WordAssemblyDirectory.FullName + "\Microsoft.Office.Interop.Word.dll"
+add-type -literalPath $WordAssemblyFile
 #End init
 $Report = "$ReportPath\$Customer-Azure.docx"
 # Creating the Word Object, set Word to not be visual and add document
@@ -122,30 +396,18 @@ $ALLAzureResources = Get-AzResource
 
 Write-Output "Getting VM's"
 $VMs = Get-AzVM -Status | Sort-Object Name
-
-$VMTable = $Selection.Tables.add($Word.Selection.Range, $VMs.Count + 1, 6)
-$VMTable.AllowAutoFit = $true
-
-$VMTable.Style = $MediumShading1
-$VMTable.Cell(1,1).Range.Text = "Name"
-$VMTable.Cell(1,2).Range.Text = "Computer Name"
-$VMTable.Cell(1,3).Range.Text = "VM Size"
-$VMTable.Cell(1,4).Range.Text = "Resource Group Name"
-$VMTable.Cell(1,5).Range.Text = "Network Interface"
-$VMTable.Cell(1,6).Range.Text = "Status"
+$TableArray = [System.Collections.ArrayList]@()
 
 ## Values
-$row=2
 Write-Output "Creating VM table"
 Foreach ($VM in $VMs) {
 
+    $TableMember = New-Object System.Object;
     $VMName = $VM.NetworkProfile.NetworkInterfaces.ID
     $Parts = $VMName.Split("/")
     $NICLabel = $PArts[8]
-
-    $VMTable.cell(($row),1).range.Bold = 0
-    $VMTable.cell(($row),1).range.text = $VM.Name
-    $VMTable.cell(($row),2).range.Bold = 0
+    
+    $TableMember | Add-Member -type NoteProperty -name VMName -Value $VM.Name
     if ($null -eq $VM.OSProfile.ComputerName) {
         #https://docs.microsoft.com/en-us/troubleshoot/azure/virtual-machines/computer-names-missing-blank
         $VirtualMachineName = "(" + $VM.Name + ")"
@@ -153,18 +415,17 @@ Foreach ($VM in $VMs) {
     else {
         $VirtualMachineName = $VM.OSProfile.ComputerName
     }
-    $VMTable.cell(($row),2).range.text = $VirtualMachineName
-    $VMTable.cell(($row),3).range.Bold = 0
-    $VMTable.cell(($row),3).range.text = $VM.HardwareProfile.VmSize
-    $VMTable.cell(($row),4).range.Bold = 0
-    $VMTable.cell(($row),4).range.text = $VM.ResourceGroupName
-    $VMTable.cell(($row),5).range.Bold = 0
-    $VMTable.cell(($row),5).range.text = $NICLabel
-    $VMTable.cell(($row),6).range.Bold = 0
-    $VMTable.cell(($row),6).range.text = $VM.Powerstate
-    $row++
+    $TableMember | Add-Member -type NoteProperty -name Computername -Value $VirtualMachineName
+    $TableMember | Add-Member -type NoteProperty -name Size -Value $VM.HardwareProfile.VmSize
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $VM.ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name NIC -Value $NICLabel
+    $TableMember | Add-Member -type NoteProperty -name Status -Value $VM.Powerstate
+    $TableArray.Add($TableMember) | Out-Null
 }
-$Word.Selection.Start= $Document.Content.End
+
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("Virtual Machine Disks")
@@ -173,47 +434,34 @@ Write-Output "Getting Disk information"
 $Disks = get-Azdisk | Sort-Object Name
 
 ## Add a table for Disks
-$DiskTable = $Selection.Tables.add($Word.Selection.Range, $Disks.Count + 1, 6)
-$DiskTable.AllowAutoFit = $true
-
-$DiskTable.Style = $MediumShading1
-$DiskTable.Cell(1,1).Range.Text = "DiskName"
-$DiskTable.Cell(1,2).Range.Text = "Servername"
-$DiskTable.Cell(1,3).Range.Text = "DiskIOPSReadWrite"
-$DiskTable.Cell(1,4).Range.Text = "DiskMBpsReadWrite"
-$DiskTable.Cell(1,5).Range.Text = "Resource Group Name"
-$DiskTable.Cell(1,6).Range.Text = "DiskSizeGB"
+$TableArray = [System.Collections.ArrayList]@()
 
 ## Values
-$row=2
 Write-Output "Creating Disk table"
 Foreach ($Disk in $Disks) {
 
-        $DiskID = $Disk.ManagedBy
-        if ($null -eq $DiskID) {
-            $Server = "Unknown"
-        }
-        else {
-            $Parts = $DiskID.Split("/")
-            $Server = $Parts[8]
-        }
+    $TableMember = New-Object System.Object;
+    $DiskID = $Disk.ManagedBy
+    if ($null -eq $DiskID) {
+        $Server = "Unknown"
+    }
+    else {
+        $Parts = $DiskID.Split("/")
+        $Server = $Parts[8]
+    }
+    
+    $TableMember | Add-Member -type NoteProperty -name DiskName -Value $Disk.Name
+    $TableMember | Add-Member -type NoteProperty -name ServerName -Value $Server
+    $TableMember | Add-Member -type NoteProperty -name DiskIO -Value $Disk.DiskIOPSReadWrite.ToString()
+    $TableMember | Add-Member -type NoteProperty -name DiskMB -Value $Disk.DiskMBpsReadWrite.ToString()
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $Disk.ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name Size -Value $Disk.DiskSizeGB.ToString()
+    $TableArray.Add($TableMember) | Out-Null
 
-    $DiskTable.cell(($row),1).range.Bold = 0
-    $DiskTable.cell(($row),1).range.text = $Disk.Name
-    $DiskTable.cell(($row),2).range.Bold = 0
-    $DiskTable.cell(($row),2).range.text = $Server
-    $DiskTable.cell(($row),3).range.Bold = 0
-    $DiskTable.cell(($row),3).range.text = $Disk.DiskIOPSReadWrite.ToString()
-    $DiskTable.cell(($row),4).range.Bold = 0
-    $DiskTable.cell(($row),4).range.text = $Disk.DiskMBpsReadWrite.ToString()
-    $DiskTable.cell(($row),5).range.Bold = 0
-    $DiskTable.cell(($row),5).range.text = $Disk.ResourceGroupName
-    $DiskTable.cell(($row),6).range.Bold = 0
-    $DiskTable.cell(($row),6).range.text = $Disk.DiskSizeGB.ToString()
-
-$row++
 }
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns DiskName, ServerName, RGN, DiskIO, DiskMB, Size -Headers "Disk Name", "Server Name", "Resource Group Name", "IOPS ReadWrite", "MBps ReadWrite", "Size (GB)"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
 
 ########
@@ -226,64 +474,43 @@ $Selection.TypeParagraph()
 
 Write-Output "Getting Network interfaces"
 $NICs = Get-AzNetworkInterface | Sort-Object Name
-
-$NICTable = $Selection.Tables.add($Word.Selection.Range, $NICs.Count + 1, 7)
-$NICTable.AllowAutoFit = $true
-
-$NICTable.Style = $MediumShading1
-$NICTable.Cell(1,1).Range.Text = "Virtual Machine"
-$NICTable.Cell(1,2).Range.Text = "Network Card Name"
-$NICTable.Cell(1,3).Range.Text = "Resource Group Name"
-$NICTable.Cell(1,4).Range.Text = "VNET"
-$NICTable.Cell(1,5).Range.Text = "Subnet"
-$NICTable.Cell(1,6).Range.Text = "Private IP Address"
-$NICTable.Cell(1,7).Range.Text = "Private IP Allocation Method"
+$TableArray = [System.Collections.ArrayList]@()
 
 ## Write NICs to NIC table 
-$row=2
 
 Write-Output "Creating NIC table"
 Foreach ($NIC in $NICs) {
 
-## Get connected VM, if there is one connected to the network interface
-If (!$NIC.VirtualMachine.id) 
-    { $VMLabel = " "}
-Else
+    $TableMember = New-Object System.Object;
+    ## Get connected VM, if there is one connected to the network interface
+    If (!$NIC.VirtualMachine.id) {
+         $VMLabel = "-"
+    }
+    Else
     {
         $VMName = $NIC.VirtualMachine.id
         $Parts = $VMName.Split("/")
         $VMLabel = $PArts[8]
     }
+    ## GET VNET and SUBNET
+    $NETCONF = $NIC.IPconfigurations.subnet.id
+    $Parts = $NETCONF.Split("/")
+    $VNETNAME = $PArts[8]
+    $SUBNETNAME = $PArts[10]
 
-## GET VNET and SUBNET
-
-        $NETCONF = $NIC.IPconfigurations.subnet.id
-        $Parts = $NETCONF.Split("/")
-        $VNETNAME = $PArts[8]
-        $SUBNETNAME = $PArts[10]
-
-    $NICTable.cell(($row),1).range.Bold = 0
-    $NICTable.cell(($row),1).range.text = $VMLabel
-    $NICTable.cell(($row),2).range.Bold = 0
-    $NICTable.cell(($row),2).range.text = $NIC.Name
-    $NICTable.cell(($row),3).range.Bold = 0
-    $NICTable.cell(($row),3).range.text = $NIC.ResourceGroupName
-    $NICTable.cell(($row),4).range.Bold = 0
-    $NICTable.cell(($row),4).range.text = $VNETNAME 
-    $NICTable.cell(($row),5).range.Bold = 0
-    $NICTable.cell(($row),5).range.text = $SUBNETNAME
-    $NICTable.cell(($row),6).range.Bold = 0   
-    $NICTable.cell(($row),6).range.text = $NIC.IPconfigurations.PrivateIpAddress
-    $NICTable.cell(($row),7).range.Bold = 0
-    $NICTable.cell(($row),7).range.text = $NIC.IPconfigurations.PrivateIpAllocationMethod
-
-
-$row++
+    $TableMember | Add-Member -type NoteProperty -name VMName -Value $VMLabel
+    $TableMember | Add-Member -type NoteProperty -name NIC-Value $NIC.Name
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $NIC.ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name VNet -Value $VNETNAME 
+    $TableMember | Add-Member -type NoteProperty -name Subnet -Value $SUBNETNAME
+    $TableMember | Add-Member -type NoteProperty -name IP -Value $NIC.IPconfigurations.PrivateIpAddress
+    $TableMember | Add-Member -type NoteProperty -name Alloc -Value $NIC.IPconfigurations.PrivateIpAllocationMethod
+    $TableArray.Add($TableMember) | Out-Null
 }
-
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VMName, NIC, RGN, VNet, Subnet, IP, Alloc -Headers  "Virtual Machine", "Network Card Name", "Resource Group Name", "VNET", "Subnet", "IP Address", "Allocation Method"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
-
 
 ##Find reservations
 $Selection.Style = $Heading2
@@ -291,34 +518,14 @@ $Selection.TypeText("Reservations")
 $Selection.TypeParagraph()
 Write-Output "Getting Reservations"
 $ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
-$ReservationTable = $Selection.Tables.add($Word.Selection.Range, $ALLReservationOrders.Count + 1, 6)
-$ReservationTable.AllowAutoFit = $true
-
-$ReservationTable.Style = $MediumShading1
-$ReservationTable.Cell(1,1).Range.Text = "DisplayName"
-$ReservationTable.Cell(1,2).Range.Text = "VMType"
-$ReservationTable.Cell(1,3).Range.Text = "Quantity"
-$ReservationTable.Cell(1,4).Range.Text = "Start"
-$ReservationTable.Cell(1,5).Range.Text = "Term"
-$ReservationTable.Cell(1,6).Range.Text = "End"
-
-$row=2
 
 Write-Output "Creating Reservation table"
+$TableArray = [System.Collections.ArrayList]@()
 Foreach ($ReservationOrder in $ALLReservationOrders) {
+    $TableMember = New-Object System.Object;
     $Reservation = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
-    $ReservationTable.cell(($row),1).range.Bold = 0
-    $ReservationTable.cell(($row),1).range.text = $Reservation.DisplayName
     $StartTime = $Reservation.EffectiveDateTime
-    $ReservationTable.cell(($row),2).range.Bold = 0
-    $ReservationTable.cell(($row),2).range.text = $Reservation.Sku
-    $ReservationTable.cell(($row),3).range.Bold = 0
-    $ReservationTable.cell(($row),3).range.text = $Reservation.Quantity
-    $ReservationTable.cell(($row),4).range.Bold = 0
-    $ReservationTable.cell(($row),4).range.text = $StartTime.ToString()
     $Term = $ReservationOrder.Term
-    $ReservationTable.cell(($row),5).range.Bold = 0
-    $ReservationTable.cell(($row),5).range.text = $Term
     $Duration = $Term.substring(1,1)
     $LastChar = $Term.substring(2,1)
     #Using switch to be flexible
@@ -327,13 +534,19 @@ Foreach ($ReservationOrder in $ALLReservationOrders) {
             $EndTime = $StartTime.AddYears($Duration)
         }
     }
-    $ReservationTable.cell(($row),6).range.Bold = 0
-    $ReservationTable.cell(($row),6).range.text = $EndTime.ToString()
-    $row++
+    $TableMember | Add-Member -type NoteProperty -name DisplayName $Reservation.DisplayName
+    $TableMember | Add-Member -type NoteProperty -name VMType -Value $Reservation.Sku
+    $TableMember | Add-Member -type NoteProperty -name Quantity -Value $Reservation.Quantity
+    $TableMember | Add-Member -type NoteProperty -name StartTime -Value $StartTime.ToString()
+    $TableMember | Add-Member -type NoteProperty -name Term -Value $Term
+    $TableMember | Add-Member -type NoteProperty -name EndTime -Value $EndTime.ToString()
+    $TableArray.Add($TableMember) | Out-Null
 }
-
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Displayname, Sku, Quantity, StartTime, Term, EndTime -Headers "Displayname", "VMType", "Quantity", "Start", "Term", "End"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
+
 ########
 ######## Create a table for NSG
 ########
@@ -345,58 +558,43 @@ $Selection.TypeParagraph()
 Write-Output "Getting NSGs"
 $NSGs = Get-AzNetworkSecurityGroup | Sort-Object Name
 
-$NSGTable = $Selection.Tables.add($Word.Selection.Range, $NSGs.Count + 1, 4)
-$NSGTable.AllowAutoFit = $true
-
-$NSGTable.Style = $MediumShading1
-$NSGTable.Cell(1,1).Range.Text = "NSG Name"
-$NSGTable.Cell(1,2).Range.Text = "Resource Group Name"
-$NSGTable.Cell(1,3).Range.Text = "Network Interfaces"
-$NSGTable.Cell(1,4).Range.Text = "Subnets"
-
 ## Write NICs to NIC table 
-$row=2
 
 Write-Output "Creating NSG table"
-Foreach ($NSG in $NSGs) {
+$TableArray = [System.Collections.ArrayList]@()
 
-## Get connected NIC, if there is one connected 
-If (!$NSG.NetworkInterfaces.Id) 
-    { $NICLabel = " "}
-Else
-    {
+Foreach ($NSG in $NSGs) {
+    $TableMember = New-Object System.Object;
+    ## Get connected NIC, if there is one connected 
+    If (!$NSG.NetworkInterfaces.Id) { 
+        $NICLabel = " "
+    }
+    Else {
         $SubnetName = $NSG.NetworkInterfaces.Id
         $Parts = $SubnetName.Split("/")
         $NICLabel = $PArts[8]
     }
-
-
-
-## Get connected SUBNET, if there is one connected 
-If (!$NSG.Subnets.Id) 
-    { $SubnetLabel = " "}
-Else
+    ## Get connected SUBNET, if there is one connected 
+    If (!$NSG.Subnets.Id) { 
+        $SubnetLabel = " "
+    }
+    Else
     {
         $SUBNETName = $NSG.Subnets.Id
         $Parts = $SUBNETName.Split("/")
         $SUBNETLabel = $PArts[10]
-      }
-
-
-    $NSGTable.cell(($row),1).range.Bold = 0
-    $NSGTable.cell(($row),1).range.text = $NSG.Name
-    $NSGTable.cell(($row),2).range.Bold = 0
-    $NSGTable.cell(($row),2).range.text = $NSG.ResourceGroupName
-    $NSGTable.cell(($row),3).range.Bold = 0
-    $NSGTable.cell(($row),3).range.text = $NICLabel
-    $NSGTable.cell(($row),4).range.Bold = 0
-    $NSGTable.cell(($row),4).range.text = $SUBNETLabel
-
-$row++
+    }
+    $TableMember | Add-Member -type NoteProperty -name NSG -Value $NSG.Name
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $NSG.ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name NI -Value $NICLabel
+    $TableMember | Add-Member -type NoteProperty -name Subnets -Value $SUBNETLabel
+    $TableArray.Add($TableMember) | Out-Null
 }
-
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns NSG, RGN, NI, Subnets -Headers "NSG Name", "Resource Group Name", "Network Interfaces", "Subnets"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
+
 
 ########
 ######## Create a table for each NSG
@@ -410,70 +608,46 @@ ForEach ($NSG in $NSGs) {
     $Selection.TypeText($NSG.Name)
     $Selection.TypeParagraph()
 
+    $TableArray = [System.Collections.ArrayList]@()
+
 	$NSGRulesCustom = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG | Sort-Object Name
 	$NSGRulesDefault = Get-AzNetworkSecurityRuleConfig -NetworkSecurityGroup $NSG -DefaultRules | Sort-Object Name
-	$NSGRuleCount = $NSGRulesCustom.Count + $NSGRulesDefault.Count
     ### Add a table for each NSG, the NSg has custom rules
-    $NSGRuleTable = $Selection.Tables.add($Word.Selection.Range, $NSGRuleCount + 1, 9)
-    $NSGRuleTable.AllowAutoFit = $true
-    $NSGRuleTable.Style = $MediumShading1
-    $NSGRuleTable.Cell(1,1).Range.Text = "Rule Name"
-    $NSGRuleTable.Cell(1,2).Range.Text = "Protocol"
-    $NSGRuleTable.Cell(1,3).Range.Text = "Source Port Range"
-    $NSGRuleTable.Cell(1,4).Range.Text = "Destination Port Range"
-    $NSGRuleTable.Cell(1,5).Range.Text = "Source Address Prefix"
-    $NSGRuleTable.Cell(1,6).Range.Text = "Destination Address Prefix"
-    $NSGRuleTable.Cell(1,7).Range.Text = "Access"
-    $NSGRuleTable.Cell(1,8).Range.Text = "Priority"
-    $NSGRuleTable.Cell(1,9).Range.Text = "Direction"
-    $row = 2
+
     ForEach ($NSGRULE in $NSGRulesCustom) {
-        $NSGRuleTable.cell(($row),1).range.Bold = 0
-        $NSGRuleTable.cell(($row),1).range.text = $NSGRule.Name
-        $NSGRuleTable.cell(($row),2).range.Bold = 0
-        $NSGRuleTable.cell(($row),2).range.text = $NSGRule.Protocol
-        $NSGRuleTable.cell(($row),3).range.Bold = 0
-        $NSGRuleTable.cell(($row),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
-        $NSGRuleTable.cell(($row),4).range.Bold = 0
-        $NSGRuleTable.cell(($row),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
-        $NSGRuleTable.cell(($row),5).range.Bold = 0
-        $NSGRuleTable.cell(($row),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
-        $NSGRuleTable.cell(($row),6).range.Bold = 0
-        $NSGRuleTable.cell(($row),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
-        $NSGRuleTable.cell(($row),7).range.Bold = 0
-        $NSGRuleTable.cell(($row),7).range.text = $NSGRule.Access
-        $NSGRuleTable.cell(($row),8).range.Bold = 0
-        $NSGRuleTable.cell(($row),8).range.text = [string]$NSGRule.Priority
-        $NSGRuleTable.cell(($row),9).range.Bold = 0
-        $NSGRuleTable.cell(($row),9).range.text = $NSGRule.Direction
-        $row++
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name RuleName -Value $NSGRule.Name
+        $TableMember | Add-Member -type NoteProperty -name Protocol -Value $NSGRule.Protocol
+        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $NSGRule.SourcePortRange
+        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $NSGRule.DestinationPortRange
+        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $NSGRule.SourceAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $NSGRule.DestinationAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name Access -Value $NSGRule.Access
+        $TableMember | Add-Member -type NoteProperty -name Prio -Value $NSGRule.Priority.ToString()
+        $TableMember | Add-Member -type NoteProperty -name Direction -Value $NSGRule.Direction
+        $TableArray.Add($TableMember) | Out-Null
     }
 
     ForEach ($NSGRULE in $NSGRulesDefault) {
-        $NSGRuleTable.cell(($row),1).range.Bold = 0
-        $NSGRuleTable.cell(($row),1).range.text = $NSGRule.Name
-        $NSGRuleTable.cell(($row),2).range.Bold = 0
-        $NSGRuleTable.cell(($row),2).range.text = $NSGRule.Protocol
-        $NSGRuleTable.cell(($row),3).range.Bold = 0
-        $NSGRuleTable.cell(($row),3).range.text = ConvertArrayToLine $NSGRule.SourcePortRange
-        $NSGRuleTable.cell(($row),4).range.Bold = 0
-        $NSGRuleTable.cell(($row),4).range.text = ConvertArrayToLine $NSGRule.DestinationPortRange
-        $NSGRuleTable.cell(($row),5).range.Bold = 0
-        $NSGRuleTable.cell(($row),5).range.text = ConvertArrayToLine $NSGRule.SourceAddressPrefix
-        $NSGRuleTable.cell(($row),6).range.Bold = 0
-        $NSGRuleTable.cell(($row),6).range.text = ConvertArrayToLine $NSGRule.DestinationAddressPrefix
-        $NSGRuleTable.cell(($row),7).range.Bold = 0
-        $NSGRuleTable.cell(($row),7).range.text = $NSGRule.Access
-        $NSGRuleTable.cell(($row),8).range.Bold = 0
-        $NSGRuleTable.cell(($row),8).range.text = [string]$NSGRule.Priority
-        $NSGRuleTable.cell(($row),9).range.Bold = 0
-        $NSGRuleTable.cell(($row),9).range.text = $NSGRule.Direction
-        $row++
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name RuleName -Value $NSGRule.Name
+        $TableMember | Add-Member -type NoteProperty -name Protocol -Value $NSGRule.Protocol
+        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $NSGRule.SourcePortRange
+        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $NSGRule.DestinationPortRange
+        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $NSGRule.SourceAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $NSGRule.DestinationAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name Access -Value $NSGRule.Access
+        $TableMember | Add-Member -type NoteProperty -name Prio -Value $NSGRule.Priority.ToString()
+        $TableMember | Add-Member -type NoteProperty -name Direction -Value $NSGRule.Direction
+        $TableArray.Add($TableMember) | Out-Null
     }
 
     ### Close the NSG table
-    $Word.Selection.Start= $Document.Content.End
+    FindWordDocumentEnd
+    $VMWordTable = AddWordTable -CustomObject $TableArray -Columns RuleName, Protocol, SourcePort, DestPort, SourcePref, DestPref, Access, Prio, Direction -Headers "Rule Name","Protocol", "Source Port Range", "Destination Port Range", "Source Address Prefix", "Destination Address Prefix", "Access", "Priority", "Direction"
+    FindWordDocumentEnd
     $Selection.TypeParagraph()
+    
 
 }
 
@@ -483,65 +657,50 @@ $Selection.Style = $Heading1
 $Selection.TypeText("VPN Information")
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
-$Selection.TypeText("VPN GatewayConnections")
+$Selection.TypeText("VPN Gateway Connections")
 $Selection.TypeParagraph()
-Write-Output "Getting VPN GatewayConnections"
+Write-Output "Getting VPN Gateway Connections"
 $NetworkConnections = $ALLAzureResources | Where-Object {$_.ResourceType -eq "Microsoft.Network/connections" } | Sort-Object Name
 Foreach ($NetworkConnection in $NetworkConnections) {
     $NSG = Get-AzVirtualNetworkGatewayConnection -ResourceName $NetworkConnection.ResourceName -ResourceGroupName $NetworkConnection.ResourceGroupName
     $NetworkGatewayConnections.Add($NSG) | Out-Null
 }
 $NetworkGatewayConnections = $NetworkGatewayConnections | Sort-Object Name
+$TableArray = [System.Collections.ArrayList]@()
+
 ########
 ######## Create a table for VPN GatewayConnections
 ########
-$VPNTable = $Selection.Tables.add($Word.Selection.Range, $NetworkGatewayConnections.Count + 1, 7)
-$VPNTable.AllowAutoFit = $true
-
-$VPNTable.Style = $MediumShading1
-$VPNTable.Cell(1,1).Range.Text = "VPN"
-$VPNTable.Cell(1,2).Range.Text = "ResourceGroup"
-$VPNTable.Cell(1,3).Range.Text = "AzureEndpoint"
-$VPNTable.Cell(1,4).Range.Text = "LocalEndpoint"
-$VPNTable.Cell(1,5).Range.Text = "Status"
-$VPNTable.Cell(1,6).Range.Text = "EgressBytesTransferredGB"
-$VPNTable.Cell(1,7).Range.Text = "IngressBytesTransferredGB"
-
 ## Values
-$row=2
 Write-Output "Creating VPN table"
 Foreach ($NGC in $NetworkGatewayConnections) {
-    $VPNTable.cell(($row),1).range.Bold = 0
-    $VPNTable.cell(($row),1).range.text = $NGC.Name
-    $VPNTable.cell(($row),2).range.Bold = 0
+    $TableMember = New-Object System.Object;
     $ResourceGroupName = $NGC.ResourceGroupName
-    $VPNTable.cell(($row),2).range.text = $ResourceGroupName
-    if (!($LocalEndPointResourceGroupNames.Contains($ResourceGroupName))) { $LocalEndPointResourceGroupNames.Add($ResourceGroupName) | Out-Null }
-    $VPNTable.cell(($row),3).range.Bold = 0
     $Parts = $NGC.VirtualNetworkGateway1.id.Split("/")
-    $Endpoint = $Parts[8]
-    $VPNTable.cell(($row),3).range.text = $Endpoint
-    $VPNTable.cell(($row),4).range.Bold = 0
+    $AzEndpoint = $Parts[8]
     $Parts = $NGC.LocalNetworkGateway2.id.Split("/")
-    $Endpoint = $Parts[8]
-    $VPNTable.cell(($row),4).range.text = $Endpoint
-    $VPNTable.cell(($row),5).range.Bold = 0
-    $VPNTable.cell(($row),5).range.text = $NGC.ConnectionStatus
-    $VPNTable.cell(($row),6).range.Bold = 0
+    $LocalEndpoint = $Parts[8]
+    if (!($LocalEndPointResourceGroupNames.Contains($ResourceGroupName))) { $LocalEndPointResourceGroupNames.Add($ResourceGroupName) | Out-Null }
+    $TableMember | Add-Member -type NoteProperty -name VPN -Value $NGC.Name
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name AzEndpoint -Value $AzEndpoint
+    $TableMember | Add-Member -type NoteProperty -name LocalEndpoint -Value $LocalEndpoint
+    $TableMember | Add-Member -type NoteProperty -name Status -Value $NGC.ConnectionStatus
     $DataGB = $NGC.EgressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $VPNTable.cell(($row),6).range.text = $DataGB.ToString()
-    $VPNTable.cell(($row),7).range.Bold = 0
+    $TableMember | Add-Member -type NoteProperty -name Egress -Value $DataGB.ToString()
     $DataGB = $NGC.IngressBytesTransferred/1048576
     $DataGB = [math]::Round($DataGB)
-    $VPNTable.cell(($row),7).range.text = $DataGB.ToString()
-    $row++
+    $TableMember | Add-Member -type NoteProperty -name Ingress -Value $DataGB.ToString()
+    $TableArray.Add($TableMember) | Out-Null
 }
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VPN, RGN, AzEndpoint, LocalEndpoint, Status, Egress, Ingress -Headers "VPN", "Resource Group", "Azure Endpoint", "Local Endpoint", "Status", "EgressBytesTransferred (GB)", "IngressBytesTransferred (GB)"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
 
 $Selection.Style = $Heading2
-$Selection.TypeText("VPN LocalGateways")
+$Selection.TypeText("VPN Local Gateways")
 $Selection.TypeParagraph()
 foreach ($LocalEndPointResourceGroupName in $LocalEndPointResourceGroupNames) {
     $LocalGateway = Get-AzLocalNetworkGateway -ResourceGroupName $LocalEndPointResourceGroupName
@@ -556,26 +715,15 @@ $LocalGatewayArray = $LocalGatewayArray | Sort-Object Name
 ########
 ######## Create a table for VPN LocalGateways
 ########
-$LocalGatewayTable = $Selection.Tables.add($Word.Selection.Range, $LocalGatewayArray.Count + 1, 4)
-$LocalGatewayTable.AllowAutoFit = $true
-
-$LocalGatewayTable.Style = $MediumShading1
-$LocalGatewayTable.Cell(1,1).Range.Text = "Name"
-$LocalGatewayTable.Cell(1,2).Range.Text = "ResourceGroup"
-$LocalGatewayTable.Cell(1,3).Range.Text = "GatewayAddress"
-$LocalGatewayTable.Cell(1,4).Range.Text = "LocalNetworkAddressSpace"
 
 ## Values
-$row=2
+$TableArray = [System.Collections.ArrayList]@()
 Write-Output "Creating VPN LocalGateway table"
 Foreach ($LocalGateway in $LocalGatewayArray) {
+    $TableMember = New-Object System.Object;
 
-
-    $LocalGatewayTable.cell(($row),1).range.Bold = 0
-    $LocalGatewayTable.cell(($row),1).range.text = $LocalGateway.Name
-    $LocalGatewayTable.cell(($row),2).range.Bold = 0
-    $LocalGatewayTable.cell(($row),2).range.text = $LocalGateway.ResourceGroupName
-    $LocalGatewayTable.cell(($row),3).range.Bold = 0
+    $TableMember | Add-Member -type NoteProperty -name Name -Value $LocalGateway.Name
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value $LocalGateway.ResourceGroupName
     $Gateway = $LocalGateway.GatewayIpAddress
     if (!($Gateway)) {
         #There is no IP adrress -> Try FQDN
@@ -585,18 +733,19 @@ Foreach ($LocalGateway in $LocalGatewayArray) {
             $Gateway = "Unkown"
         }
     }
-    $LocalGatewayTable.cell(($row),3).range.text = $Gateway
-    $LocalGatewayTable.cell(($row),4).range.Bold = 0
+    $TableMember | Add-Member -type NoteProperty -name GateIP -Value $Gateway
     if ($LocalGateway.LocalNetworkAddressSpace.AddressPrefixes) {
         $LocalAddressSpace = ConvertArrayToLine $LocalGateway.LocalNetworkAddressSpace.AddressPrefixes
     }
     else {
         $LocalAddressSpace = "NOT defined"
     }
-    $LocalGatewayTable.cell(($row),4).range.text = $LocalAddressSpace
-    $row++
+    $TableMember | Add-Member -type NoteProperty -name LocalNetwork $LocalAddressSpace
+    $TableArray.Add($TableMember) | Out-Null
 }
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, GateIP, LocalNetwork -Headers "Name", "ResourcevvGroup", "Gateway Address", "Local Network AddressSpace"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
 
 $Selection.InsertNewPage()
@@ -607,26 +756,17 @@ $AllPublicIPs = Get-AzPublicIpAddress | Sort-Object Name
 ########
 ######## Create a table for Public IP addresses
 ########
-$AllPublicIPTable = $Selection.Tables.add($Word.Selection.Range, $AllPublicIPs.Count + 1, 4)
-$AllPublicIPTable.AllowAutoFit = $true
 
-$AllPublicIPTable.Style = $MediumShading1
-$AllPublicIPTable.Cell(1,1).Range.Text = "Name"
-$AllPublicIPTable.Cell(1,2).Range.Text = "ResourceGroup"
-$AllPublicIPTable.Cell(1,3).Range.Text = "IPAddress"
-$AllPublicIPTable.Cell(1,4).Range.Text = "PublicIpAllocationMethod"
-$AllPublicIPTable.Cell(1,4).Range.Text = "Usedby"
+
 ## Values
-$row=2
 Write-Output "Creating Public IP table"
+$TableArray = [System.Collections.ArrayList]@()
 Foreach ($PublicIP in $AllPublicIPs) {
-    $AllPublicIPTable.cell(($row),1).range.Bold = 0
-    $AllPublicIPTable.cell(($row),1).range.text = $PublicIP.Name
-    $AllPublicIPTable.cell(($row),2).range.Bold = 0
-    $AllPublicIPTable.cell(($row),2).range.text = $PublicIP.ResourceGroupName
-    $AllPublicIPTable.cell(($row),3).range.Bold = 0
-    $AllPublicIPTable.cell(($row),3).range.text = $PublicIP.IpAddress
-    $AllPublicIPTable.cell(($row),4).range.Bold = 0
+    $TableMember = New-Object System.Object;
+
+    $TableMember | Add-Member -type NoteProperty -name Name -Value $PublicIP.Name
+    $TableMember | Add-Member -type NoteProperty -name RGN -Value  $PublicIP.ResourceGroupName
+    $TableMember | Add-Member -type NoteProperty -name IP -Value  $PublicIP.IpAddress
     if ($PublicIP.IpConfiguration.id) {
         $Parts = $PublicIP.IpConfiguration.id.Split("/")
         $Endpoint = $Parts[8]
@@ -634,12 +774,13 @@ Foreach ($PublicIP in $AllPublicIPs) {
     else {
         $Endpoint = "Unused"
     }
-    $AllPublicIPTable.cell(($row),4).range.text = $Endpoint
-    $row++
+    $TableMember | Add-Member -type NoteProperty -name Endpoint -Value  $Endpoint
+    $TableArray.Add($TableMember) | Out-Null
 }
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, IP, Endpoint -Headers "Name", "Resource Group", "IP Address", "Usedby"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
-
 
 #Adding recovery information
 $Selection.InsertNewPage()
@@ -653,58 +794,80 @@ foreach ($Vault in $Vaults) {
 ########
 ######## Create a table the backupjobs found
 ########
-$BackupTable = $Selection.Tables.add($Word.Selection.Range, $NumberOfBackupJobs + 1, 6)
-$BackupTable.AllowAutoFit = $true
-
-$BackupTable.Style = $MediumShading1
-$BackupTable.Cell(1,1).Range.Text = "RecoveryVault"
-$BackupTable.Cell(1,2).Range.Text = "Workloadname"
-$BackupTable.Cell(1,3).Range.Text = "Status"
-$BackupTable.Cell(1,4).Range.Text = "StartTime"
-$BackupTable.Cell(1,5).Range.Text = "EndTime"
-$BackupTable.Cell(1,6).Range.Text = "LatestRestorePoint"
 
 ## Values
-$row=2
 #Get Only Restore points of the last week.
 $startDate = (Get-Date).AddDays(-7)
 $endDate = Get-Date
 Write-Output "Creating Backup job table"
+$TableArray = [System.Collections.ArrayList]@()
 Foreach ($Vault in $Vaults) {
-    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | where-object { $_.Operation -eq "Backup" } | Sort-Object WorkloadName
+    #$BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | Where-Object { $_.BackupManagementType -eq "AzureVM" } | Sort-Object WorkloadName
+    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
+    # | Sort-Object WorkloadName
+    $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
+    #$namedContainerSQLs = Get-AzRecoveryServicesBackupItem -BackupManagementType AzureWorkload -WorkloadType MSSQL -VaultId $vault.id
     foreach ($BackupJob in $BackupJobs) {
-        Write-Output "Getting restore points for $($BackupJob.WorkloadName)."
-        $namedContainer = Get-AzRecoveryServicesBackupContainer  -ContainerType $BackupJob.BackupManagementType -Status "Registered" -FriendlyName $BackupJob.workloadname.ToUpper() -VaultId $Vault.ID
-        $backupitem = Get-AzRecoveryServicesBackupItem -Container $namedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
-        $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
-        if ($rp) {
-            $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+        $TableMember = New-Object System.Object;
+
+        Write-Output "Getting restore points for $($BackupJob.WorkloadName.ToUpper())."
+        switch ($BackupJob.BackupManagementType) {
+            "AzureVM" {
+                foreach ($namedContainer in $namedContainerVMs) {
+                    if ($BackupJob.workloadname.ToUpper() -eq $namedContainer.FriendlyName.ToUpper()) {
+                        $BackupnamedContainer = $namedContainer
+                        break;
+                    }
+                }
+                $WorkloadName = $BackupJob.workloadname.ToUpper()
+                $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
+                $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                if ($rp) {
+                    $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                }
+                else {
+                    $LatestRestorePoint = "Unkown"
+                }
+            }
+            "AzureWorkload" {
+                $WorkloadArray = $BackupJob.workloadname.Split(" ")
+                $SQLDatabase = $WorkloadArray[0]
+                $SQLServer = $WorkloadArray[1].Substring(1,$WorkloadArray[1].Length-2)
+                #As we are checking for a database we might get more than one result. 
+                $bkpItems = Get-AzRecoveryServicesBackupItem -BackupManagementType $BackupJob.BackupManagementType -WorkloadType MSSQL -Name $SQLDatabase -VaultId $Vault.ID
+                $LatestRestorePoint = "unkown"
+                $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
+                foreach ($backupitem in $bkpItems) {
+                    $ServerNameArray=$backupitem.ServerName.Split(".")
+                    if ($ServerNameArray[0] -eq $SQLServer){ 
+                        $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                        $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                    }
+                }  
+            }
+            default {
+                $LatestRestorePoint = "Unkown"
+            }
         }
-        else {
-            $LatestRestorePoint = "Unkown"
-        }
-        $BackupTable.cell(($row),1).range.Bold = 0
-        $BackupTable.cell(($row),1).range.text = $Vault.Name
-        $BackupTable.cell(($row),2).range.Bold = 0
-        $BackupTable.cell(($row),2).range.text = $BackupJob.WorkloadName
-        $BackupTable.cell(($row),3).range.Bold = 0
-        $BackupTable.cell(($row),3).range.text = $BackupJob.Status
-        $BackupTable.cell(($row),4).range.Bold = 0
-        $BackupTable.cell(($row),4).range.text = $BackupJob.StartTime.ToString()
-        $BackupTable.cell(($row),5).range.Bold = 0
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $Vault.Name
+        $TableMember | Add-Member -type NoteProperty -name Workload -Value $WorkloadName
+        $TableMember | Add-Member -type NoteProperty -name Status -Value $BackupJob.Status
+        $TableMember | Add-Member -type NoteProperty -name StartTime -Value $BackupJob.StartTime.ToString()
         if ($BackupJob.Status -eq "InProgress") {
             $BackupJobEndTime = "-"
         }
         else {
             $BackupJobEndTime = $BackupJob.EndTime.ToString()
         }
-        $BackupTable.cell(($row),5).range.text = $BackupJobEndTime
-        $BackupTable.cell(($row),6).range.Bold = 0
-        $BackupTable.cell(($row),6).range.text = $LatestRestorePoint
-        $row++
+        $TableMember | Add-Member -type NoteProperty -name EndTime -Value $BackupJobEndTime
+        $TableMember | Add-Member -type NoteProperty -name RP -Value $LatestRestorePoint
+        $TableArray.Add($TableMember) | Out-Null
     }
 }
-$Word.Selection.Start= $Document.Content.End
+FindWordDocumentEnd
+$TableArray = $TableArray | Sort-Object Name, Workload
+$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, Workload, Status, StartTime, EndTime, RP -Headers "Vault", "Backup Item", "Status", "Start Time", "End Time", "Latest RestorePoint"
+FindWordDocumentEnd
 $Selection.TypeParagraph()
 
 ### Update the TOC now when all data has been written to the document 
@@ -720,7 +883,7 @@ $null = [System.Runtime.InteropServices.Marshal]::ReleaseComObject([System.__Com
 [gc]::Collect()
 [gc]::WaitForPendingFinalizers()
 Remove-Variable word 
-$elapsedTime = $(get-date) - $startTime
+$elapsedTime = $(get-date) - $StartScriptTime
 $Minutes = $elapsedTime.Minutes
 $Seconds = $elapsedTime.Seconds
 Write-Output "Script done in $Minutes Minute(s) and $Seconds Second(s)."
