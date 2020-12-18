@@ -54,34 +54,34 @@ Param
 	be altered after the table has been appended to the document (a table reference
 	is Returned).
 .EXAMPLE
-	AddWordTable -Hashtable $HashtableArray
+	$WordTable = AddWordTable -Hashtable $HashtableArray
 
 	This example adds table to the MS Word document, utilising all key/value pairs in
 	the array of hashtables. Column headers will display the key names as defined.
 	Note: the columns might not be displayed in the order that they were defined. To
 	ensure columns are displayed in the required order utilise the -Columns parameter.
 .EXAMPLE
-	AddWordTable -Hashtable $HashtableArray -List
+	$WordTable = AddWordTable -Hashtable $HashtableArray -List
 
 	This example adds table to the MS Word document, utilising all key/value pairs in
 	the array of hashtables. No column headers will be added, in a ListView format.
 	Note: the columns might not be displayed in the order that they were defined. To
 	ensure columns are displayed in the required order utilise the -Columns parameter.
 .EXAMPLE
-	AddWordTable -CustomObject $PSCustomObjectArray
+	$WordTable = AddWordTable -CustomObject $PSCustomObjectArray
 
 	This example adds table to the MS Word document, utilising all note property names
 	the array of PSCustomObjects. Column headers will display the note property names.
 	Note: the columns might not be displayed in the order that they were defined. To
 	ensure columns are displayed in the required order utilise the -Columns parameter.
 .EXAMPLE
-	AddWordTable -Hashtable $HashtableArray -Columns FirstName,LastName,EmailAddress
+	$WordTable = AddWordTable -Hashtable $HashtableArray -Columns FirstName,LastName,EmailAddress
 
 	This example adds a table to the MS Word document, but only using the specified
 	key names: FirstName, LastName and EmailAddress. If other keys are present in the
 	array of Hashtables they will be ignored.
 .EXAMPLE
-	AddWordTable -CustomObject $PSCustomObjectArray -Columns FirstName,LastName,EmailAddress -Headers "First Name","Last Name","Email Address"
+	$WordTable = AddWordTable -CustomObject $PSCustomObjectArray -Columns FirstName,LastName,EmailAddress -Headers "First Name","Last Name","Email Address"
 
 	This example adds a table to the MS Word document, but only using the specified
 	PSCustomObject note properties: FirstName, LastName and EmailAddress. If other note
@@ -334,12 +334,11 @@ if ($TenantId -and $SubscriptionId) {
 $NetworkGatewayConnections = [System.Collections.ArrayList]@()
 $LocalEndPointResourceGroupNames = [System.Collections.ArrayList]@()
 $LocalGatewayArray = [System.Collections.ArrayList]@()
-$NumberOfBackupJobs = 0
 [int]$wdMove = 0
 [int]$wdSeekMainDocument = 0
 #[int]$wdSeekPrimaryFooter = 4
 [int]$wdStory = 6
-[long]$wdColorRed = 255
+#[long]$wdColorRed = 255
 #http://msdn.microsoft.com/en-us/library/office/ff844856%28v=office.15%29.aspx
 #[int]$wdAutoFitFixed = 0
 [int]$wdAutoFitContent = 1
@@ -365,7 +364,7 @@ $ALLStyles = $document.Styles | Select-Object NameLocal
 $Title = $AllStyles[360].Namelocal
 $Heading1 = $AllStyles[149].Namelocal
 $Heading2 = $AllStyles[150].Namelocal
-$MediumShading1 = $AllStyles[38].Namelocal
+#$MediumShading1 = $AllStyles[38].Namelocal
 ## Add some text to start with
 $Selection.Style = $Title
 $Selection.TypeText("Azure Documentation for $Customer")
@@ -424,7 +423,7 @@ Foreach ($VM in $VMs) {
 }
 
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status"
+$WordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
@@ -460,7 +459,7 @@ Foreach ($Disk in $Disks) {
 
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns DiskName, ServerName, RGN, DiskIO, DiskMB, Size -Headers "Disk Name", "Server Name", "Resource Group Name", "IOPS ReadWrite", "MBps ReadWrite", "Size (GB)"
+$WordTable = AddWordTable -CustomObject $TableArray -Columns DiskName, ServerName, RGN, DiskIO, DiskMB, Size -Headers "Disk Name", "Server Name", "Resource Group Name", "IOPS ReadWrite", "MBps ReadWrite", "Size (GB)"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -499,7 +498,7 @@ Foreach ($NIC in $NICs) {
     $SUBNETNAME = $PArts[10]
 
     $TableMember | Add-Member -type NoteProperty -name VMName -Value $VMLabel
-    $TableMember | Add-Member -type NoteProperty -name NIC-Value $NIC.Name
+    $TableMember | Add-Member -type NoteProperty -name NIC -Value $NIC.Name
     $TableMember | Add-Member -type NoteProperty -name RGN -Value $NIC.ResourceGroupName
     $TableMember | Add-Member -type NoteProperty -name VNet -Value $VNETNAME 
     $TableMember | Add-Member -type NoteProperty -name Subnet -Value $SUBNETNAME
@@ -508,7 +507,7 @@ Foreach ($NIC in $NICs) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VMName, NIC, RGN, VNet, Subnet, IP, Alloc -Headers  "Virtual Machine", "Network Card Name", "Resource Group Name", "VNET", "Subnet", "IP Address", "Allocation Method"
+$WordTable = AddWordTable -CustomObject $TableArray -Columns VMName, NIC, RGN, VNet, Subnet, IP, Alloc -Headers  "Virtual Machine", "Network Card Name", "Resource Group Name", "VNET", "Subnet", "IP Address", "Allocation Method"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -517,6 +516,7 @@ $Selection.Style = $Heading2
 $Selection.TypeText("Reservations")
 $Selection.TypeParagraph()
 Write-Output "Getting Reservations"
+#If there are no reservations - Operation returned an invalid status code 'Forbidden' is being displayed
 $ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
 
 Write-Output "Creating Reservation table"
@@ -543,7 +543,13 @@ Foreach ($ReservationOrder in $ALLReservationOrders) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Displayname, Sku, Quantity, StartTime, Term, EndTime -Headers "Displayname", "VMType", "Quantity", "Start", "Term", "End"
+if ($TableArray) {
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Displayname, Sku, Quantity, StartTime, Term, EndTime -Headers "Displayname", "VMType", "Quantity", "Start", "Term", "End"
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No Reservations found.")  
+}
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -591,7 +597,7 @@ Foreach ($NSG in $NSGs) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns NSG, RGN, NI, Subnets -Headers "NSG Name", "Resource Group Name", "Network Interfaces", "Subnets"
+$WordTable = AddWordTable -CustomObject $TableArray -Columns NSG, RGN, NI, Subnets -Headers "NSG Name", "Resource Group Name", "Network Interfaces", "Subnets"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -644,7 +650,7 @@ ForEach ($NSG in $NSGs) {
 
     ### Close the NSG table
     FindWordDocumentEnd
-    $VMWordTable = AddWordTable -CustomObject $TableArray -Columns RuleName, Protocol, SourcePort, DestPort, SourcePref, DestPref, Access, Prio, Direction -Headers "Rule Name","Protocol", "Source Port Range", "Destination Port Range", "Source Address Prefix", "Destination Address Prefix", "Access", "Priority", "Direction"
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns RuleName, Protocol, SourcePort, DestPort, SourcePref, DestPref, Access, Prio, Direction -Headers "Rule Name","Protocol", "Source Port Range", "Destination Port Range", "Source Address Prefix", "Destination Address Prefix", "Access", "Priority", "Direction"
     FindWordDocumentEnd
     $Selection.TypeParagraph()
     
@@ -695,7 +701,13 @@ Foreach ($NGC in $NetworkGatewayConnections) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns VPN, RGN, AzEndpoint, LocalEndpoint, Status, Egress, Ingress -Headers "VPN", "Resource Group", "Azure Endpoint", "Local Endpoint", "Status", "EgressBytesTransferred (GB)", "IngressBytesTransferred (GB)"
+if ($TableArray) {
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns VPN, RGN, AzEndpoint, LocalEndpoint, Status, Egress, Ingress -Headers "VPN", "Resource Group", "Azure Endpoint", "Local Endpoint", "Status", "EgressBytesTransferred (GB)", "IngressBytesTransferred (GB)"
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No VPN found.")  
+}
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -744,7 +756,13 @@ Foreach ($LocalGateway in $LocalGatewayArray) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, GateIP, LocalNetwork -Headers "Name", "ResourcevvGroup", "Gateway Address", "Local Network AddressSpace"
+if ($TableArray) { 
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, GateIP, LocalNetwork -Headers "Name", "Resource Group", "FQDN/Gateway Address", "Local Network Address Space"
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No Local gateway found.")  
+}
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -778,7 +796,13 @@ Foreach ($PublicIP in $AllPublicIPs) {
     $TableArray.Add($TableMember) | Out-Null
 }
 FindWordDocumentEnd
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, IP, Endpoint -Headers "Name", "Resource Group", "IP Address", "Usedby"
+if ($TableArray) { 
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, RGN, IP, Endpoint -Headers "Name", "Resource Group", "IP Address", "Usedby"
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No public IP found.")  
+}
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
@@ -788,9 +812,6 @@ $Selection.Style = $Heading1
 $Selection.TypeText("Azure Backups")
 $Selection.TypeParagraph()
 $Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
-foreach ($Vault in $Vaults) {
-    $NumberOfBackupJobs += (Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | where-object { $_.Operation -eq "Backup" } ).Count
-}
 ########
 ######## Create a table the backupjobs found
 ########
@@ -801,27 +822,28 @@ $startDate = (Get-Date).AddDays(-7)
 $endDate = Get-Date
 Write-Output "Creating Backup job table"
 $TableArray = [System.Collections.ArrayList]@()
+$BackupFailed = 0
+$BackupJobFailed = $null
 Foreach ($Vault in $Vaults) {
-    #$BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID | Where-Object { $_.BackupManagementType -eq "AzureVM" } | Sort-Object WorkloadName
     $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
-    # | Sort-Object WorkloadName
     $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
-    #$namedContainerSQLs = Get-AzRecoveryServicesBackupItem -BackupManagementType AzureWorkload -WorkloadType MSSQL -VaultId $vault.id
     foreach ($BackupJob in $BackupJobs) {
         $TableMember = New-Object System.Object;
 
         Write-Output "Getting restore points for $($BackupJob.WorkloadName.ToUpper())."
+        $rp = @()
         switch ($BackupJob.BackupManagementType) {
             "AzureVM" {
                 foreach ($namedContainer in $namedContainerVMs) {
+                    #Friendly name can be in multiple namedcontainers
                     if ($BackupJob.workloadname.ToUpper() -eq $namedContainer.FriendlyName.ToUpper()) {
                         $BackupnamedContainer = $namedContainer
-                        break;
+                        $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
+                        $rp += Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
                     }
                 }
                 $WorkloadName = $BackupJob.workloadname.ToUpper()
-                $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
-                $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                
                 if ($rp) {
                     $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
                 }
@@ -859,14 +881,50 @@ Foreach ($Vault in $Vaults) {
         else {
             $BackupJobEndTime = $BackupJob.EndTime.ToString()
         }
+        if ($BackupJob.Status -eq "failed") {
+            $BackupFailed++
+            if ($BackupJobFailed -eq 1) {
+                $BackupJobFailed = $BackupJobFailed + ", $WorkloadName"
+            }
+            else {
+                $BackupJobFailed = $WorkloadName
+            }
+        }
         $TableMember | Add-Member -type NoteProperty -name EndTime -Value $BackupJobEndTime
         $TableMember | Add-Member -type NoteProperty -name RP -Value $LatestRestorePoint
         $TableArray.Add($TableMember) | Out-Null
     }
 }
 FindWordDocumentEnd
-$TableArray = $TableArray | Sort-Object Name, Workload
-$VMWordTable = AddWordTable -CustomObject $TableArray -Columns Name, Workload, Status, StartTime, EndTime, RP -Headers "Vault", "Backup Item", "Status", "Start Time", "End Time", "Latest RestorePoint"
+if ($TableArray){ 
+    $TableArray = $TableArray | Sort-Object Name, Workload
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, Workload, Status, StartTime, EndTime, RP -Headers "Vault", "Backup Item", "Status", "Start Time (UTC)", "End Time (UTC)", "Latest RestorePoint (UTC)"
+    FindWordDocumentEnd
+    $Selection.TypeParagraph()
+    switch ($backupFailed) {
+        1 { 
+            $Selection.TypeText("One failed backup where found!")
+            $Selection.TypeText("The job that failed is: $BackupJobFailed.")   
+            $Selection.TypeParagraph()
+        }
+        2 {
+            $Selection.TypeText("Two or more failed backups where found!")
+            $Selection.TypeText("The jobs that failed are $BackupJobFailed.")   
+            $Selection.TypeParagraph()
+        }
+        Default {}
+    }
+    if ($BackupFailed -eq 1) {
+
+    }
+    else {
+
+    }
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No Backup found.")  
+}
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
