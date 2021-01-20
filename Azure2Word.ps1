@@ -30,7 +30,7 @@ Uses modules AZ and Az.Reservations
 Install-module -Name az
 Install-Module -Name Az.Accounts -RequiredVersion 1.9.2
 Install-Module -Name Az.Reservations
-Last Modified: 2020/12/4
+Last Modified: 2020/12/18
 #>
 
 Param
@@ -407,6 +407,12 @@ Foreach ($VM in $VMs) {
     $NICLabel = $PArts[8]
     
     $TableMember | Add-Member -type NoteProperty -name VMName -Value $VM.Name
+    if ($null -eq $VM.Zones) 
+        {$AvailablityZone = "-"
+    }
+    else {
+        $AvailablityZone = $VM.Zones
+    }
     if ($null -eq $VM.OSProfile.ComputerName) {
         #https://docs.microsoft.com/en-us/troubleshoot/azure/virtual-machines/computer-names-missing-blank
         $VirtualMachineName = "(" + $VM.Name + ")"
@@ -419,11 +425,12 @@ Foreach ($VM in $VMs) {
     $TableMember | Add-Member -type NoteProperty -name RGN -Value $VM.ResourceGroupName
     $TableMember | Add-Member -type NoteProperty -name NIC -Value $NICLabel
     $TableMember | Add-Member -type NoteProperty -name Status -Value $VM.Powerstate
+    $TableMember | Add-Member -type NoteProperty -name Zone -Value $AvailablityZone
     $TableArray.Add($TableMember) | Out-Null
 }
 
 FindWordDocumentEnd
-$WordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status"
+$WordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status, Zone -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status", "Zone"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
@@ -521,10 +528,9 @@ $ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
 
 Write-Output "Creating Reservation table"
 $TableArray = [System.Collections.ArrayList]@()
-Foreach ($ReservationOrder in $ALLReservationOrders) {
-    $TableMember = New-Object System.Object;
-    $Reservation = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
-    $StartTime = $Reservation.EffectiveDateTime
+Foreach ($ReservationOrder in $ALLReservationOrders) {  
+    $AllReservations = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
+    $StartTime = $ReservationOrder.CreatedDateTime
     $Term = $ReservationOrder.Term
     $Duration = $Term.substring(1,1)
     $LastChar = $Term.substring(2,1)
@@ -534,17 +540,21 @@ Foreach ($ReservationOrder in $ALLReservationOrders) {
             $EndTime = $StartTime.AddYears($Duration)
         }
     }
-    $TableMember | Add-Member -type NoteProperty -name DisplayName $Reservation.DisplayName
-    $TableMember | Add-Member -type NoteProperty -name VMType -Value $Reservation.Sku
-    $TableMember | Add-Member -type NoteProperty -name Quantity -Value $Reservation.Quantity
-    $TableMember | Add-Member -type NoteProperty -name StartTime -Value $StartTime.ToString()
-    $TableMember | Add-Member -type NoteProperty -name Term -Value $Term
-    $TableMember | Add-Member -type NoteProperty -name EndTime -Value $EndTime.ToString()
-    $TableArray.Add($TableMember) | Out-Null
+    foreach ($Reservation in $AllReservations) {
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name DisplayName $Reservation.DisplayName
+        $TableMember | Add-Member -type NoteProperty -name sku -Value $Reservation.Sku
+        $TableMember | Add-Member -type NoteProperty -name Quantity -Value $Reservation.Quantity
+        $TableMember | Add-Member -type NoteProperty -name StartTime -Value $StartTime.ToString()
+        $TableMember | Add-Member -type NoteProperty -name Term -Value $Term
+        $TableMember | Add-Member -type NoteProperty -name EndTime -Value $EndTime.ToString()
+        $TableMember | Add-Member -type NoteProperty -name State -Value $Reservation.ProvisioningState
+        $TableArray.Add($TableMember) | Out-Null
+    }
 }
 FindWordDocumentEnd
 if ($TableArray) {
-    $WordTable = AddWordTable -CustomObject $TableArray -Columns Displayname, Sku, Quantity, StartTime, Term, EndTime -Headers "Displayname", "VMType", "Quantity", "Start", "Term", "End"
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Displayname, Sku, Quantity, StartTime, Term, EndTime, State -Headers "Displayname", "VMType", "Quantity", "Start", "Term", "End", "Status"
 }
 else {
     $Selection.TypeParagraph()
@@ -830,7 +840,8 @@ Foreach ($Vault in $Vaults) {
     foreach ($BackupJob in $BackupJobs) {
         $TableMember = New-Object System.Object;
 
-        Write-Output "Getting restore points for $($BackupJob.WorkloadName.ToUpper())."
+        Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
+        #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
         $rp = @()
         switch ($BackupJob.BackupManagementType) {
             "AzureVM" {
@@ -848,16 +859,32 @@ Foreach ($Vault in $Vaults) {
                     $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
                 }
                 else {
-                    $LatestRestorePoint = "Unkown"
+                    if ($BackupJob.Operation -eq "ConfigureBackup") {
+                        $LatestRestorePoint = "Configuring"
+                    }
+                    else {
+                        $LatestRestorePoint = "Unkown"
+                    }
                 }
             }
             "AzureWorkload" {
                 $WorkloadArray = $BackupJob.workloadname.Split(" ")
-                $SQLDatabase = $WorkloadArray[0]
-                $SQLServer = $WorkloadArray[1].Substring(1,$WorkloadArray[1].Length-2)
+                if ($WorkloadArray.Count -eq 2) {
+                    $SQLDatabase = $WorkloadArray[0]
+                    $SQLServer = $WorkloadArray[1].Substring(1,$WorkloadArray[1].Length-2)
+                }
+                else {
+                    $SQLDatabase = $BackupJob.workloadname
+                    $SQLServer = "FirstBackup"                 
+                }
                 #As we are checking for a database we might get more than one result. 
                 $bkpItems = Get-AzRecoveryServicesBackupItem -BackupManagementType $BackupJob.BackupManagementType -WorkloadType MSSQL -Name $SQLDatabase -VaultId $Vault.ID
-                $LatestRestorePoint = "unkown"
+                if ($BackupJob.Operation -eq "ConfigureBackup") {
+                    $LatestRestorePoint = "Configuring"
+                }
+                else {
+                    $LatestRestorePoint = "Unkown"
+                }
                 $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
                 foreach ($backupitem in $bkpItems) {
                     $ServerNameArray=$backupitem.ServerName.Split(".")
@@ -868,7 +895,12 @@ Foreach ($Vault in $Vaults) {
                 }  
             }
             default {
-                $LatestRestorePoint = "Unkown"
+                if ($BackupJob.Operation -eq "ConfigureBackup") {
+                    $LatestRestorePoint = "Configuring"
+                }
+                else {
+                    $LatestRestorePoint = "Unkown"
+                }
             }
         }
         $TableMember | Add-Member -type NoteProperty -name Name -Value $Vault.Name
