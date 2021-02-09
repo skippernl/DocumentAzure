@@ -316,7 +316,7 @@ Function FindWordDocumentEnd
 
 $StartScriptTime = get-date 
 Write-Output "Script Started."
-Connect-AzAccount | Out-Null
+#Connect-AzAccount | Out-Null
 if (!($?)) {
     Write-Output "Error logging in to Azure."
     Write-Output "Script stopped."
@@ -834,14 +834,26 @@ Write-Output "Creating Backup job table"
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
 $BackupJobFailed = $null
+$CounterVault = 0
+$MaxCounterVault=$Vaults.Count
 Foreach ($Vault in $Vaults) {
+    $ProcVault = $CounterVault/$MaxCounterVault*100
+    $ProcVaultString = $ProcVault.ToString("0.00")
+    Write-Progress -ID 0 -Activity "Parsing vault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
     $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
     $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
+    $CounterVault++
+    $CounterBackupJob = 0
+    $MaxCounterBackupJob = $BackupJobs.Count
     foreach ($BackupJob in $BackupJobs) {
         $TableMember = New-Object System.Object;
-
-        Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
+        
+        $ProcBackup = $CounterBackupJob/$MaxCounterBackupJob*100
+        $ProcBackupString = $ProcBackup.ToString("0.00")
+        Write-Progress -ID 1 -Activity "Parsing backup job $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" -PercentComplete ($ProcBackup)
+        #Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
         #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
+        $CounterBackupJob++
         $rp = @()
         switch ($BackupJob.BackupManagementType) {
             "AzureVM" {
@@ -890,7 +902,17 @@ Foreach ($Vault in $Vaults) {
                     $ServerNameArray=$backupitem.ServerName.Split(".")
                     if ($ServerNameArray[0] -eq $SQLServer){ 
                         $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
-                        $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                        if ($rp) {
+                            $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                        }
+                        else {
+                            if ($BackupJob.Operation -eq "ConfigureBackup") {
+                                $LatestRestorePoint = "Configuring"
+                            }
+                            else {
+                                $LatestRestorePoint = "Unkown"
+                            }
+                        }
                     }
                 }  
             }
@@ -955,11 +977,69 @@ if ($TableArray){
 }
 else {
     $Selection.TypeParagraph()
-    $Selection.TypeText("No Backup found.")  
+    $Selection.TypeText("No Backups found.")  
 }
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 
+Write-Output "Creating Replication job table"
+#Adding recovery information
+#Only get information from last 24h
+$startDate = (Get-Date).AddDays(-1)
+$endDate = Get-Date
+$Selection.InsertNewPage()
+$Selection.Style = $Heading1
+$Selection.TypeText("Azure Replication")
+$Selection.TypeParagraph()
+$TableArray = [System.Collections.ArrayList]@()
+$BackupFailed = 0
+$BackupJobFailed = $null
+$CounterVault = 0
+$MaxCounterVault=$Vaults.Count
+Foreach ($Vault in $Vaults) {   
+    $ProcVault = $CounterVault/$MaxCounterVault*100
+    $ProcVaultString = $ProcVault.ToString("0.00")
+    Write-Progress -ID 0 -Activity "Parsing vault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
+    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
+    $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
+    $CounterVault++
+    Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+    $ReplicationJobs = Get-AzRecoveryServicesAsrJob -StartTime $startdate.ToUniversalTime() -EndTime $enddate.ToUniversalTime()
+
+    #Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
+    #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
+   
+    if ($ReplicationJobs) {
+        $CounterReplJob = 0
+        $MaxCounterReplJob=$ReplicationJobs.Count
+        foreach ($ReplicationJob in $ReplicationJobs) {
+            $TableMember = New-Object System.Object;
+
+            $ProcRepl = $CounterReplJob/$MaxCounterReplJob*100
+            $ProcReplString = $ProcRepl.ToString("0.00")
+            Write-Progress -ID 1 -Activity "Parsing replication job $($ReplicationJob.TargetObjectName) ($ProcReplString%)" -PercentComplete ($ProcRepl)
+            $CounterReplJob++
+            $TableMember | Add-Member -type NoteProperty -name Vault -Value $Vault.Name
+            $TableMember | Add-Member -type NoteProperty -name Server -Value $ReplicationJob.TargetObjectName
+            $TableMember | Add-Member -type NoteProperty -name JobType -Value $ReplicationJob.JobType
+            $TableMember | Add-Member -type NoteProperty -name State -Value $ReplicationJob.State
+            $TableMember | Add-Member -type NoteProperty -name StartTime -Value $ReplicationJob.StartTime
+            $TableMember | Add-Member -type NoteProperty -name EndTime -Value $ReplicationJob.EndTime
+            $TableArray.Add($TableMember) | Out-Null
+        }
+    }
+}
+FindWordDocumentEnd
+if ($TableArray){ 
+    $TableArray = $TableArray | Sort-Object Vault, Server, JobType
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Vault, Server, JobType, State, StartTime, EndTime -Headers "Vault", "Server", "JobType", "Status", "Start Time (UTC)", "End Time (UTC)"
+    FindWordDocumentEnd
+    $Selection.TypeParagraph()
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No Replication Jobs found.")  
+}
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
 
