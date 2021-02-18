@@ -834,23 +834,25 @@ Write-Output "Creating Backup job table"
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
 $BackupJobFailed = $null
-$CounterVault = 0
+$CounterVault = 1
 $MaxCounterVault=$Vaults.Count
 Foreach ($Vault in $Vaults) {
     $ProcVault = $CounterVault/$MaxCounterVault*100
     $ProcVaultString = $ProcVault.ToString("0.00")
-    Write-Progress -ID 0 -Activity "Parsing vault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
+    Write-Progress -ID 0 -Activity "Checking vault $CounterVault/$MaxCounterVault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
     $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
     $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
     $CounterVault++
-    $CounterBackupJob = 0
+    $CounterBackupJob = 1
     $MaxCounterBackupJob = $BackupJobs.Count
+    $Activity = $null
     foreach ($BackupJob in $BackupJobs) {
         $TableMember = New-Object System.Object;
         
         $ProcBackup = $CounterBackupJob/$MaxCounterBackupJob*100
         $ProcBackupString = $ProcBackup.ToString("0.00")
-        Write-Progress -ID 1 -Activity "Parsing backup job $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" -PercentComplete ($ProcBackup)
+        $Activity = "Checking backup job $CounterBackupJob/$MaxCounterBackupJob $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" 
+        Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcBackup)
         #Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
         #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
         $CounterBackupJob++
@@ -948,6 +950,7 @@ Foreach ($Vault in $Vaults) {
         $TableMember | Add-Member -type NoteProperty -name RP -Value $LatestRestorePoint
         $TableArray.Add($TableMember) | Out-Null
     }
+    if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
 }
 FindWordDocumentEnd
 if ($TableArray){ 
@@ -994,45 +997,49 @@ $Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
 $BackupJobFailed = $null
-$CounterVault = 0
-$MaxCounterVault=$Vaults.Count
-Foreach ($Vault in $Vaults) {   
-    $ProcVault = $CounterVault/$MaxCounterVault*100
-    $ProcVaultString = $ProcVault.ToString("0.00")
-    Write-Progress -ID 0 -Activity "Parsing vault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
-    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
-    $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
-    $CounterVault++
-    Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
-    $ReplicationJobs = Get-AzRecoveryServicesAsrJob -StartTime $startdate.ToUniversalTime() -EndTime $enddate.ToUniversalTime()
+$ASRFabrics = Get-AzRecoveryServicesAsrFabric
+$CounterASRFabrics = 1
+$MaxCounterASRFabrics = $ASRFabrics.Count
+Foreach ($ASRFabric in $ASRFabrics) {  
+    $ProcASRFabric = $CounterASRFabrics/$MaxCounterASRFabrics*100
+    $ProcASRFabricString = $ProcASRFabric.ToString("0.00") 
+    Write-Progress -ID 0 -Activity "ASR Fabric $($ASRFabric.FriendlyName) ($ProcASRFabricString%)" -PercentComplete ($ProcASRFabric)
+    $ProtectionContainers = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $ASRFabric
+    $Activity = $null
+    if ($ProtectionContainers) {
+        foreach ($ProtectionContainer in $ProtectionContainers) {
+            $ProtectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $ProtectionContainer
+            $CounterProtectedItems = 1
+            $MaxCounterProtectedItems = $ProtectedItems.Count
+            foreach ($ProtectedItem in $ProtectedItems) {
+                $ProcProtectedItems = $CounterProtectedItems/$MaxCounterProtectedItems*100
+                $ProcPProtectedItemString = $ProcProtectedItems.ToString("0.00")
+                
+                $TableMember = New-Object System.Object;
 
-    #Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
-    #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
-   
-    if ($ReplicationJobs) {
-        $CounterReplJob = 0
-        $MaxCounterReplJob=$ReplicationJobs.Count
-        foreach ($ReplicationJob in $ReplicationJobs) {
-            $TableMember = New-Object System.Object;
+                $ReplVM=Get-AzRecoveryServicesAsrReplicationProtectedItem -FriendlyName $ProtectedItem.FriendlyName -ProtectionContainer $ProtectionContainer
+                $Activity = "Checking ASR $CounterProtectedItems/$MaxCounterProtectedItems for $($ReplVM.RecoveryAzureVMName) ($ProcPProtectedItemString%)"
+                Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcProtectedItems)
+                $CounterProtectedItems++
+                $RecoveryPoints = Get-AzRecoveryServicesAsrRecoveryPoint -ReplicationProtectedItem $ReplVM
+                $LastRecoveryPoint=$RecoveryPoints[$RecoveryPoints.count-1]
 
-            $ProcRepl = $CounterReplJob/$MaxCounterReplJob*100
-            $ProcReplString = $ProcRepl.ToString("0.00")
-            Write-Progress -ID 1 -Activity "Parsing replication job $($ReplicationJob.TargetObjectName) ($ProcReplString%)" -PercentComplete ($ProcRepl)
-            $CounterReplJob++
-            $TableMember | Add-Member -type NoteProperty -name Vault -Value $Vault.Name
-            $TableMember | Add-Member -type NoteProperty -name Server -Value $ReplicationJob.TargetObjectName
-            $TableMember | Add-Member -type NoteProperty -name JobType -Value $ReplicationJob.JobType
-            $TableMember | Add-Member -type NoteProperty -name State -Value $ReplicationJob.State
-            $TableMember | Add-Member -type NoteProperty -name StartTime -Value $ReplicationJob.StartTime
-            $TableMember | Add-Member -type NoteProperty -name EndTime -Value $ReplicationJob.EndTime
-            $TableArray.Add($TableMember) | Out-Null
-        }
+                $TableMember | Add-Member -type NoteProperty -name Location -Value $ReplVM.RecoveryFabricFriendlyName
+                $TableMember | Add-Member -type NoteProperty -name Server -Value $ReplVM.RecoveryAzureVMName
+                $TableMember | Add-Member -type NoteProperty -name State -Value $LastRecoveryPoint.RecoveryPointType
+                $TableMember | Add-Member -type NoteProperty -name RPTime -Value $LastRecoveryPoint.RecoveryPointTime
+                $TableMember | Add-Member -type NoteProperty -name Policy -Value $ReplVM.PolicyFriendlyName
+                $TableMember | Add-Member -type NoteProperty -name LastOKTest -Value $ReplVM.LastSuccessfulTestFailoverTime
+                $TableArray.Add($TableMember) | Out-Null
+            }
+        }   
     }
+    if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
 }
 FindWordDocumentEnd
 if ($TableArray){ 
-    $TableArray = $TableArray | Sort-Object Vault, Server, JobType
-    $WordTable = AddWordTable -CustomObject $TableArray -Columns Vault, Server, JobType, State, StartTime, EndTime -Headers "Vault", "Server", "JobType", "Status", "Start Time (UTC)", "End Time (UTC)"
+    $TableArray = $TableArray | Sort-Object Location,Server
+    $WordTable = AddWordTable -CustomObject $TableArray -Columns Location, Server, State, RPTime, Policy -Headers "Location", "Server", "Status", "Last Restore Point Time (UTC)", "Policy"
     FindWordDocumentEnd
     $Selection.TypeParagraph()
 }
