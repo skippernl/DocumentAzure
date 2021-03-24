@@ -1,7 +1,21 @@
 # Azure2Word.ps1
 Azure2Word uses powershell to get Azure information and puts this in a Word document
 
-Currently Azure Backup (VM/SQL), NSG (Network Security Groups), Public IPs, VM information and VPN (Site 2 site) are documented
+Currently Documented:
+
+Azure Backup (VM/SQL)
+
+Azure Firewall
+
+Azure Replication
+
+NSG (Network Security Groups)
+
+Public IPs
+
+Virtual Machine information 
+
+VPN (Site 2 site)
 
 Works with Word Office365
 
@@ -54,4 +68,4 @@ Install-Module -Name Az.Reservations
 
 Idea: Anders Bengtsson http://contoso.se/blog/?p=4286
 
-Last Modified: 2020/12/18
+Last Modified: 2021/03/24
