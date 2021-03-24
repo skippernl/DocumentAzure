@@ -292,6 +292,52 @@ Function AddWordTable
 
 	} ## end Process
 }
+Function ArrayToLine ($ImputArray) {
+	
+	$ArrayLine = "" 
+	Foreach ($ImputMember in $ImputArray) {
+		if ($ArrayLine -eq "") { $ArrayLine = $ImputMember }
+		else { $ArrayLine = $ArrayLine + "," + $ImputMember }
+	}
+	Return $ArrayLine
+}
+Function CleanupLine ($LineToCleanUp) {
+    $LineToCleanUp = $LineToCleanUp.TrimStart()
+    $LineToCleanUpArray = $LineToCleanUp.Split('"')
+    $i=1
+    $ReturnValue = $null
+    if ($LineToCleanUpArray.Count -gt 1) {
+        #Line has "" in it 
+        DO {
+            $LineToCleanUpArrayMember = $LineToCleanUpArray[$i]
+            if ($LineToCleanUpArrayMember -ne "") {
+                if ($ReturnValue) { $ReturnValue = $ReturnValue + "," + $LineToCleanUpArrayMember }
+                else { $ReturnValue = $LineToCleanUpArrayMember}
+            }
+            $i++
+            #The next value is a space and can always be skipped
+            $i++
+        } While ($i -le $LineToCleanUpArray.Count-1)
+    }
+    else {
+        #Line has only Space as seperators
+        $LineToCleanUpArray = $LineToCleanUp.Split(' ')
+        if ($LineToCleanUpArray.Count -ge 3) {
+            $i=2
+            $ReturnValue = $null
+            DO {
+                if ($LineToCleanUpArray[$i] -ne " ") {
+                    if ($ReturnValue) { $ReturnValue = $ReturnValue + "," + $LineToCleanUpArray[$i] }
+                    else { $ReturnValue = $LineToCleanUpArray[$i]}
+                }
+                $i++
+            } While ($i -le $LineToCleanUpArray.Count-1)
+        }
+        else { $ReturnValue = $LineToCleanUpArray[$LineToCleanUpArray.Count-1] }
+    }
+    return $ReturnValue
+}
+
 Function ConvertArrayToLine ($ConvertArray) {
 #This function converts an Array to a sinlge line of text)
 if ($ConvertArray) {
@@ -312,11 +358,36 @@ Function FindWordDocumentEnd
 	#move to the end of the current document
 	$Selection.EndKey($wdStory,$wdMove) | Out-Null
 }
-
+Function GroupArrayToLine ($ImputArray) {
+	
+	$ArrayLine = "" 
+	Foreach ($ImputMember in $ImputArray) {
+		$Parts = $ImputMember.Split("/")
+		if ($ArrayLine -eq "") { $ArrayLine = $Parts[8] }
+		else { $ArrayLine = $ArrayLine + "," + $Parts[8] }
+	}
+	Return $ArrayLine
+}
+Function InitFirewallRule {
+    $InitRule = New-Object System.Object;
+	$InitRule | Add-Member -type NoteProperty -name Firewall -Value ""
+	$InitRule | Add-Member -type NoteProperty -name FirewallPolicyName -Value ""
+	$InitRule | Add-Member -type NoteProperty -name FirewallPolRuleName -Value ""
+	$InitRule | Add-Member -type NoteProperty -name FirewallRulePrio -Value ""
+	$InitRule | Add-Member -type NoteProperty -name Protocols -Value ""
+	$InitRule | Add-Member -type NoteProperty -name Source -Value ""
+	$InitRule | Add-Member -type NoteProperty -name Destination -Value ""
+	$InitRule | Add-Member -Type NoteProperty -Name destinationPorts -Value ""
+	$InitRule | Add-Member -Type NoteProperty -Name ruleType -Value ""
+	$InitRule | Add-Member -Type NoteProperty -Name translated -Value ""
+	$InitRule | Add-Member -Type NoteProperty -Name translatedPort -Value ""
+    $InitRule | Add-Member -type NoteProperty -name FirewallRuleName -Value ""
+    return $InitRule      
+}
 
 $StartScriptTime = get-date 
 Write-Output "Script Started."
-#Connect-AzAccount | Out-Null
+Connect-AzAccount | Out-Null
 if (!($?)) {
     Write-Output "Error logging in to Azure."
     Write-Output "Script stopped."
@@ -846,14 +917,13 @@ Foreach ($Vault in $Vaults) {
     $CounterBackupJob = 1
     $MaxCounterBackupJob = $BackupJobs.Count
     $Activity = $null
-    foreach ($BackupJob in $BackupJobs) {
+    ForEach ($BackupJob in $BackupJobs) {
         $TableMember = New-Object System.Object;
-        
+
         $ProcBackup = $CounterBackupJob/$MaxCounterBackupJob*100
         $ProcBackupString = $ProcBackup.ToString("0.00")
         $Activity = "Checking backup job $CounterBackupJob/$MaxCounterBackupJob $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" 
         Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcBackup)
-        #Write-Output "Getting restore points for Vault $($Vault.Name), Job $($BackupJob.WorkloadName.ToUpper())."
         #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
         $CounterBackupJob++
         $rp = @()
@@ -997,13 +1067,20 @@ $Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
 $BackupJobFailed = $null
-$ASRFabrics = Get-AzRecoveryServicesAsrFabric
+$ASRFabrics = [System.Collections.ArrayList]@()
+
+foreach ($Vault in $Vaults) {
+    Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+    $ASRFabrics += Get-AzRecoveryServicesAsrFabric
+}
+#$ASRFabrics = Get-AzRecoveryServicesAsrFabric
 $CounterASRFabrics = 1
 $MaxCounterASRFabrics = $ASRFabrics.Count
 Foreach ($ASRFabric in $ASRFabrics) {  
     $ProcASRFabric = $CounterASRFabrics/$MaxCounterASRFabrics*100
     $ProcASRFabricString = $ProcASRFabric.ToString("0.00") 
-    Write-Progress -ID 0 -Activity "ASR Fabric $($ASRFabric.FriendlyName) ($ProcASRFabricString%)" -PercentComplete ($ProcASRFabric)
+    $ASRActivity = "ASR Fabric $($ASRFabric.FriendlyName) ($ProcASRFabricString%)"
+    Write-Progress -ID 0 -Activity $ASRActivity -PercentComplete ($ProcASRFabric)
     $ProtectionContainers = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $ASRFabric
     $Activity = $null
     if ($ProtectionContainers) {
@@ -1017,7 +1094,7 @@ Foreach ($ASRFabric in $ASRFabrics) {
                 
                 $TableMember = New-Object System.Object;
 
-                $ReplVM=Get-AzRecoveryServicesAsrReplicationProtectedItem -FriendlyName $ProtectedItem.FriendlyName -ProtectionContainer $ProtectionContainer
+                $ReplVM = Get-AzRecoveryServicesAsrReplicationProtectedItem -FriendlyName $ProtectedItem.FriendlyName -ProtectionContainer $ProtectionContainer
                 $Activity = "Checking ASR $CounterProtectedItems/$MaxCounterProtectedItems for $($ReplVM.RecoveryAzureVMName) ($ProcPProtectedItemString%)"
                 Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcProtectedItems)
                 $CounterProtectedItems++
@@ -1035,6 +1112,7 @@ Foreach ($ASRFabric in $ASRFabrics) {
         }   
     }
     if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
+    if ($Activity) { Write-Progress -ID 0 -Activity $ASRActivity -Status "Ready" -Completed }
 }
 FindWordDocumentEnd
 if ($TableArray){ 
@@ -1046,6 +1124,123 @@ if ($TableArray){
 else {
     $Selection.TypeParagraph()
     $Selection.TypeText("No Replication Jobs found.")  
+}
+
+Write-Output "Creating Firewall table"
+
+$Selection.InsertNewPage()
+$Selection.Style = $Heading1
+$Selection.TypeText("Azure Firewall")
+$Selection.TypeParagraph()
+$TableArray = [System.Collections.ArrayList]@()
+
+$FWs = get-azfirewall
+$TableArray = [System.Collections.ArrayList]@()
+foreach ($FW in $FWs) {
+	$FWFPID = Get-AzFirewallPolicy -ResourceId $fw.FirewallPolicy.id
+	$FWRCGroups = $FWFPID.RuleCollectionGroups
+	foreach ($FWRCGroup in $FWRCGroups) {
+		$Parts = $FWRCGroup.ID.Split("/")
+		$FirewallPolicyRuleName =  $Parts[10]
+		$FirewallResourceGroup = $Parts[4]
+		$FirewallPolicyName = $Parts[8]
+		$FirewallPRCG = Get-AzFirewallPolicyRuleCollectionGroup -AzureFirewallPolicyName $FirewallPolicyName -Name $FirewallPolicyRuleName -ResourceGroupName $FirewallResourceGroup
+		$FWRuleColections = $FirewallPRCG.Properties.RuleCollection
+		Foreach ($FWRuleColection in $FWRuleColections) {
+			foreach ($FWRule in $FWRuleColection.Rules) {
+				$TableMember = InitFirewallRule
+				$TableMember | Add-Member -MemberType NoteProperty -name Firewall -Value $FW.Name -force
+				$TableMember | Add-Member -MemberType NoteProperty -name FirewallPolicyName -Value $FirewallPolicyName -force
+				$TableMember | Add-Member -MemberType NoteProperty -name FirewallPolRuleName -Value $FirewallPolicyRuleName -force
+				$TableMember | Add-Member -MemberType NoteProperty -name FirewallRulePrio -Value $FWRuleColection.Priority -force
+				$TableMember | Add-Member -MemberType NoteProperty -Name ruleType -Value $FWRule.RuleType -force
+				$Value = ArrayToLine $FWRule.Protocols
+				$TableMember | Add-Member -MemberType NoteProperty -Name Protocols -Value $Value -force
+				$Value = ArrayToLine $FWRule.DestinationPorts
+				$TableMember | Add-Member -MemberType NoteProperty -Name DestinationPorts -Value $Value -force
+				$TableMember | Add-Member -MemberType NoteProperty -Name FirewallRuleName -Value $FWRule.Name -force
+				if ($FWRule.SourceAddresses) {
+					$Value = ArrayToLine $FWRule.SourceAddresses
+					$TableMember | Add-Member -MemberType NoteProperty -Name Source -Value $Value -force
+				}
+				if ($FWRule.SourceIpGroups) {
+					$Value = GroupArrayToLine $FWRule.SourceIpGroups
+					$TableMember | Add-Member -MemberType NoteProperty -Name Source -Value $Value -force
+				}					
+				if ($FWRule.DestinationAddresses) {
+					$Value = ArrayToLine $FWRule.DestinationAddresses
+					$TableMember | Add-Member -MemberType NoteProperty -Name Destination -Value $Value -force
+				}
+				if ($FWRule.DestinationIpGroups) {
+					$Value = GroupArrayToLine $FWRule.DestinationIpGroups
+					$TableMember | Add-Member -MemberType NoteProperty -Name Destination -Value $Value -force
+				}			
+				if ($FWRule.DestinationFqdns) {
+					$Value = ArrayToLine $FWRule.DestinationFqdns
+					$TableMember | Add-Member -MemberType NoteProperty -Name Destination -Value $Value -force
+				}	
+				if ($FWRule.TranslatedAddress) { $TableMember | Add-Member -MemberType NoteProperty -Name translated -Value $FWRule.TranslatedAddress -force }
+				if ($FWRule.TranslatedFqdn) { $TableMember | Add-Member -MemberType NoteProperty -Name translated -Value $FWRule.TranslatedFqdn -force }
+				if ($FWRule.translatedPort) { $TableMember | Add-Member -MemberType NoteProperty -Name translatedPort -Value $FWRule.translatedPort -force }				
+			}
+			$TableArray.Add($TableMember) | Out-Null
+		}
+	}
+}
+if ($TableArray) {
+    $DNATTable = $TableArray | where-object { $_.RuleType -eq "NatRule" }
+    $RuleTable = $TableArray | where-object { $_.RuleType -ne "NatRule" }
+    if ($DNATTable) {
+        $Selection.Style = $Heading2
+        $Selection.TypeText("Incoming Rules")
+        $Selection.TypeParagraph()
+        FindWordDocumentEnd
+        $DNATTable = $DNATTable | Sort-Object FirewallRulePrio
+        $WordTable = AddWordTable -CustomObject $DNATTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, FirewallRuleName, Name, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts, translated, translatedPort -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports", "Translated", "Translated Port"
+        FindWordDocumentEnd
+    }
+    if ($RuleTable) {
+        $Selection.TypeParagraph()
+        $Selection.Style = $Heading2
+        $Selection.TypeText("Outgoing Rules")
+        $Selection.TypeParagraph()
+        FindWordDocumentEnd
+        $RuleTable = $RuleTable | Sort-Object FirewallRulePrio
+        $WordTable = AddWordTable -CustomObject $RuleTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, FirewallRuleName, Name, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports"
+        FindWordDocumentEnd
+    }
+}
+Else { 
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No Firewall found.")     
+}
+
+
+$AllIPGroups = get-azipgroup
+if ($ALLIPGroups) {
+    $Selection.Style = $Heading2
+    $Selection.TypeText("Groups")
+    $Selection.TypeParagraph()
+    FindWordDocumentEnd
+    $TableArray = [System.Collections.ArrayList]@()
+    foreach ($IPGroup in $ALLIPGroups) {
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $IPGroup.Name
+        $IpAddressList = ""
+        foreach ($IpAddress in $IPgroup.IpAddresses) {
+            if ($IpAddressList) {
+                $IpAddressList = $IpAddressList + "," + $IpAddress
+            }
+            else {
+                $IpAddressList = $IpAddress
+            } 
+        }
+        $TableMember | Add-Member -type NoteProperty -name Members -Value $IpAddressList
+        $TableArray.Add($TableMember) | Out-Null
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Members -Headers "Name", "Members"
+    FindWordDocumentEnd
 }
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
