@@ -301,43 +301,6 @@ Function ArrayToLine ($ImputArray) {
 	}
 	Return $ArrayLine
 }
-Function CleanupLine ($LineToCleanUp) {
-    $LineToCleanUp = $LineToCleanUp.TrimStart()
-    $LineToCleanUpArray = $LineToCleanUp.Split('"')
-    $i=1
-    $ReturnValue = $null
-    if ($LineToCleanUpArray.Count -gt 1) {
-        #Line has "" in it 
-        DO {
-            $LineToCleanUpArrayMember = $LineToCleanUpArray[$i]
-            if ($LineToCleanUpArrayMember -ne "") {
-                if ($ReturnValue) { $ReturnValue = $ReturnValue + "," + $LineToCleanUpArrayMember }
-                else { $ReturnValue = $LineToCleanUpArrayMember}
-            }
-            $i++
-            #The next value is a space and can always be skipped
-            $i++
-        } While ($i -le $LineToCleanUpArray.Count-1)
-    }
-    else {
-        #Line has only Space as seperators
-        $LineToCleanUpArray = $LineToCleanUp.Split(' ')
-        if ($LineToCleanUpArray.Count -ge 3) {
-            $i=2
-            $ReturnValue = $null
-            DO {
-                if ($LineToCleanUpArray[$i] -ne " ") {
-                    if ($ReturnValue) { $ReturnValue = $ReturnValue + "," + $LineToCleanUpArray[$i] }
-                    else { $ReturnValue = $LineToCleanUpArray[$i]}
-                }
-                $i++
-            } While ($i -le $LineToCleanUpArray.Count-1)
-        }
-        else { $ReturnValue = $LineToCleanUpArray[$LineToCleanUpArray.Count-1] }
-    }
-    return $ReturnValue
-}
-
 Function ConvertArrayToLine ($ConvertArray) {
 #This function converts an Array to a sinlge line of text)
 if ($ConvertArray) {
@@ -370,18 +333,20 @@ Function GroupArrayToLine ($ImputArray) {
 }
 Function InitFirewallRule {
     $InitRule = New-Object System.Object;
+    $InitRule | Add-Member -type NoteProperty -name Destination -Value ""
+	$InitRule | Add-Member -Type NoteProperty -Name destinationPorts -Value ""
 	$InitRule | Add-Member -type NoteProperty -name Firewall -Value ""
 	$InitRule | Add-Member -type NoteProperty -name FirewallPolicyName -Value ""
 	$InitRule | Add-Member -type NoteProperty -name FirewallPolRuleName -Value ""
+    $InitRule | Add-Member -type NoteProperty -name FirewallRuleName -Value ""
 	$InitRule | Add-Member -type NoteProperty -name FirewallRulePrio -Value ""
+    $InitRule | Add-Member -type NoteProperty -name NetworkRuleCollection -Value ""
 	$InitRule | Add-Member -type NoteProperty -name Protocols -Value ""
-	$InitRule | Add-Member -type NoteProperty -name Source -Value ""
-	$InitRule | Add-Member -type NoteProperty -name Destination -Value ""
-	$InitRule | Add-Member -Type NoteProperty -Name destinationPorts -Value ""
 	$InitRule | Add-Member -Type NoteProperty -Name ruleType -Value ""
+    $InitRule | Add-Member -type NoteProperty -name Source -Value ""
 	$InitRule | Add-Member -Type NoteProperty -Name translated -Value ""
 	$InitRule | Add-Member -Type NoteProperty -Name translatedPort -Value ""
-    $InitRule | Add-Member -type NoteProperty -name FirewallRuleName -Value ""
+    
     return $InitRule      
 }
 
@@ -1137,22 +1102,23 @@ $TableArray = [System.Collections.ArrayList]@()
 $FWs = get-azfirewall
 $TableArray = [System.Collections.ArrayList]@()
 foreach ($FW in $FWs) {
-	$FWFPID = Get-AzFirewallPolicy -ResourceId $fw.FirewallPolicy.id
-	$FWRCGroups = $FWFPID.RuleCollectionGroups
+	$FWPolicy = Get-AzFirewallPolicy -ResourceId $fw.FirewallPolicy.id
+	$FWRCGroups = $FWPolicy.RuleCollectionGroups
 	foreach ($FWRCGroup in $FWRCGroups) {
 		$Parts = $FWRCGroup.ID.Split("/")
 		$FirewallPolicyRuleName =  $Parts[10]
 		$FirewallResourceGroup = $Parts[4]
 		$FirewallPolicyName = $Parts[8]
 		$FirewallPRCG = Get-AzFirewallPolicyRuleCollectionGroup -AzureFirewallPolicyName $FirewallPolicyName -Name $FirewallPolicyRuleName -ResourceGroupName $FirewallResourceGroup
-		$FWRuleColections = $FirewallPRCG.Properties.RuleCollection
-		Foreach ($FWRuleColection in $FWRuleColections) {
-			foreach ($FWRule in $FWRuleColection.Rules) {
+		$FWRuleCollections = $FirewallPRCG.Properties.RuleCollection
+		Foreach ($FWRuleCollection in $FWRuleCollections) {
+   			foreach ($FWRule in $FWRuleCollection.Rules) {
 				$TableMember = InitFirewallRule
 				$TableMember | Add-Member -MemberType NoteProperty -name Firewall -Value $FW.Name -force
 				$TableMember | Add-Member -MemberType NoteProperty -name FirewallPolicyName -Value $FirewallPolicyName -force
 				$TableMember | Add-Member -MemberType NoteProperty -name FirewallPolRuleName -Value $FirewallPolicyRuleName -force
-				$TableMember | Add-Member -MemberType NoteProperty -name FirewallRulePrio -Value $FWRuleColection.Priority -force
+				$TableMember | Add-Member -MemberType NoteProperty -name FirewallRulePrio -Value $FWRuleCollection.Priority -force
+                $TableMember | Add-Member -MemberType NoteProperty -name NetworkRuleCollection $FWRuleCollection.Name -force
 				$TableMember | Add-Member -MemberType NoteProperty -Name ruleType -Value $FWRule.RuleType -force
 				$Value = ArrayToLine $FWRule.Protocols
 				$TableMember | Add-Member -MemberType NoteProperty -Name Protocols -Value $Value -force
@@ -1195,8 +1161,8 @@ if ($TableArray) {
         $Selection.TypeText("Incoming Rules")
         $Selection.TypeParagraph()
         FindWordDocumentEnd
-        $DNATTable = $DNATTable | Sort-Object FirewallRulePrio
-        $WordTable = AddWordTable -CustomObject $DNATTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, FirewallRuleName, Name, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts, translated, translatedPort -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports", "Translated", "Translated Port"
+        $DNATTable = $DNATTable | Sort-Object Firewall,FirewallRulePrio
+        $WordTable = AddWordTable -CustomObject $DNATTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, NetworkRuleCollection, FirewallRuleName, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts, translated, translatedPort -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports", "Translated", "Translated Port"
         FindWordDocumentEnd
     }
     if ($RuleTable) {
@@ -1205,8 +1171,8 @@ if ($TableArray) {
         $Selection.TypeText("Outgoing Rules")
         $Selection.TypeParagraph()
         FindWordDocumentEnd
-        $RuleTable = $RuleTable | Sort-Object FirewallRulePrio
-        $WordTable = AddWordTable -CustomObject $RuleTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, FirewallRuleName, Name, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports"
+        $RuleTable = $RuleTable | Sort-Object Firewall, FirewallRulePrio
+        $WordTable = AddWordTable -CustomObject $RuleTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, NetworkRuleCollection, FirewallRuleName, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports"
         FindWordDocumentEnd
     }
 }
