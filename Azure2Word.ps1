@@ -16,7 +16,9 @@ Connects to Azure powershell to get (virtual server) information
 .\Azure2Word -Customer Contoso -ReportPath c:\reports -TenantId xxxx-xxxx -SubscriptionId yyyy-yyyy
     Runs the script for customer Contoso and create the word file in c:\reports 
     Running the scipt on TenantID xxxx-xxxx and SubscriptionID yyyy-yyy
-.NOTES
+.PARAMETER SkipVaults
+[OPTIONAL] set to false to skip Backup and Replication
+    .\Azure2Word -Customer Contoso -ReportPath c:\reports -SkipVaults:$true
 Author: Xander Angenent (@XaAng70)
 Adapted and fixed errors by SkipperNL
 Idea: Anders Bengtsson http://contoso.se/blog/?p=4286
@@ -39,6 +41,7 @@ Param
     $Customer,
     [Parameter(Mandatory = $true)]
     $ReportPath,
+    $SkipVaults,
     $TenantId,
     $SubscriptionId
 )
@@ -314,6 +317,17 @@ if ($ConvertArray) {
     return $TextLine
 
 }
+Function FindVM ($VMNic) {
+#This function searches the Virtual Machine that is connected to a Nic interface
+    $VirtualMachine = "Unkown"
+    foreach ($VM in $VMArray) {
+        if ($VM.nic -eq $VMNic) {
+            $VirtualMachine = $VM.VMName
+            break
+        }
+    }
+    return $VirtualMachine
+}
 Function FindWordDocumentEnd
 {
 	#Return focus to main document    
@@ -400,7 +414,13 @@ $ALLStyles = $document.Styles | Select-Object NameLocal
 $Title = $AllStyles[360].Namelocal
 $Heading1 = $AllStyles[149].Namelocal
 $Heading2 = $AllStyles[150].Namelocal
-#$MediumShading1 = $AllStyles[38].Namelocal
+$Heading3 = $AllStyles[151].Namelocal
+$HeaderFooterIndex = "microsoft.office.interop.word.WdHeaderFooterIndex" -as [type]
+$alignmentTab = "microsoft.office.interop.word.WdAlignmentTabAlignment" -as [type]
+$section = $Document.sections.item(1)
+$header = $section.headers.item($HeaderFooterIndex::wdHeaderFooterFirstPage)
+$header.range.InsertAlignmentTab($alignmentTab::wdRight)
+$header.range.InsertAfter("Azure Documentation for $Customer")
 ## Add some text to start with
 $Selection.Style = $Title
 $Selection.TypeText("Azure Documentation for $Customer")
@@ -431,7 +451,7 @@ $ALLAzureResources = Get-AzResource
 
 Write-Output "Getting VM's"
 $VMs = Get-AzVM -Status | Sort-Object Name
-$TableArray = [System.Collections.ArrayList]@()
+$VMArray = [System.Collections.ArrayList]@()
 
 ## Values
 Write-Output "Creating VM table"
@@ -462,11 +482,12 @@ Foreach ($VM in $VMs) {
     $TableMember | Add-Member -type NoteProperty -name NIC -Value $NICLabel
     $TableMember | Add-Member -type NoteProperty -name Status -Value $VM.Powerstate
     $TableMember | Add-Member -type NoteProperty -name Zone -Value $AvailablityZone
-    $TableArray.Add($TableMember) | Out-Null
+    $VMArray.Add($TableMember) | Out-Null
 }
 
 FindWordDocumentEnd
-$WordTable = AddWordTable -CustomObject $TableArray -Columns VMName, Computername, RGN, Size, NIC, Status, Zone -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status", "Zone"
+$VMArray = $VMArray | Sort-Object VMName
+$WordTable = AddWordTable -CustomObject $VMArray -Columns VMName, Computername, RGN, Size, NIC, Status, Zone -Headers  "VM Name", "Computer name", "Resource Group Name", "VM Size", "Network Interface", "Power Status", "Zone"
 FindWordDocumentEnd
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
@@ -670,10 +691,14 @@ ForEach ($NSG in $NSGs) {
         $TableMember = New-Object System.Object;
         $TableMember | Add-Member -type NoteProperty -name RuleName -Value $NSGRule.Name
         $TableMember | Add-Member -type NoteProperty -name Protocol -Value $NSGRule.Protocol
-        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $NSGRule.SourcePortRange
-        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $NSGRule.DestinationPortRange
-        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $NSGRule.SourceAddressPrefix
-        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $NSGRule.DestinationAddressPrefix
+        $Value = ArrayToLine $NSGRule.SourcePortRange
+        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $Value
+        $Value = ArrayToLine $NSGRule.DestinationPortRange
+        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $Value
+        $Value = ArrayToLine $NSGRule.SourceAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $Value
+        $Value = ArrayToLine $NSGRule.DestinationAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $Value
         $TableMember | Add-Member -type NoteProperty -name Access -Value $NSGRule.Access
         $TableMember | Add-Member -type NoteProperty -name Prio -Value $NSGRule.Priority.ToString()
         $TableMember | Add-Member -type NoteProperty -name Direction -Value $NSGRule.Direction
@@ -684,10 +709,14 @@ ForEach ($NSG in $NSGs) {
         $TableMember = New-Object System.Object;
         $TableMember | Add-Member -type NoteProperty -name RuleName -Value $NSGRule.Name
         $TableMember | Add-Member -type NoteProperty -name Protocol -Value $NSGRule.Protocol
-        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $NSGRule.SourcePortRange
-        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $NSGRule.DestinationPortRange
-        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $NSGRule.SourceAddressPrefix
-        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $NSGRule.DestinationAddressPrefix
+        $Value = ArrayToLine $NSGRule.SourcePortRange
+        $TableMember | Add-Member -type NoteProperty -name SourcePort -Value $Value
+        $Value = ArrayToLine $NSGRule.DestinationPortRange
+        $TableMember | Add-Member -type NoteProperty -name DestPort -Value $Value
+        $Value = ArrayToLine $NSGRule.SourceAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name SourcePref -Value $Value
+        $Value = ArrayToLine $NSGRule.DestinationAddressPrefix
+        $TableMember | Add-Member -type NoteProperty -name DestPref -Value $Value
         $TableMember | Add-Member -type NoteProperty -name Access -Value $NSGRule.Access
         $TableMember | Add-Member -type NoteProperty -name Prio -Value $NSGRule.Priority.ToString()
         $TableMember | Add-Member -type NoteProperty -name Direction -Value $NSGRule.Direction
@@ -836,7 +865,7 @@ Foreach ($PublicIP in $AllPublicIPs) {
         $Endpoint = $Parts[8]
     }
     else {
-        $Endpoint = "Unused"
+        $Endpoint = "Unused or NAT"
     }
     $TableMember | Add-Member -type NoteProperty -name Endpoint -Value  $Endpoint
     $TableArray.Add($TableMember) | Out-Null
@@ -855,9 +884,9 @@ $Selection.TypeParagraph()
 #Adding recovery information
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
-$Selection.TypeText("Azure Backups")
+$Selection.TypeText("Backup and Replication")
 $Selection.TypeParagraph()
-$Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
+if (!($SkipVaults)) {$Vaults = Get-AzRecoveryServicesVault | Sort-Object Name }
 ########
 ######## Create a table the backupjobs found
 ########
@@ -867,6 +896,9 @@ $Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
 $startDate = (Get-Date).AddDays(-7)
 $endDate = Get-Date
 Write-Output "Creating Backup job table"
+$Selection.Style = $Heading2
+$Selection.TypeText("Backup")
+$Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
 $BackupJobFailed = $null
@@ -1015,7 +1047,12 @@ if ($TableArray){
 }
 else {
     $Selection.TypeParagraph()
-    $Selection.TypeText("No Backups found.")  
+    if ($SkipVaults) {
+        $Selection.TypeText("No Vault information selected.") 
+    }
+    else {
+        $Selection.TypeText("No Backups found.") 
+    }
 }
 FindWordDocumentEnd
 $Selection.TypeParagraph()
@@ -1026,8 +1063,8 @@ Write-Output "Creating Replication job table"
 $startDate = (Get-Date).AddDays(-1)
 $endDate = Get-Date
 $Selection.InsertNewPage()
-$Selection.Style = $Heading1
-$Selection.TypeText("Azure Replication")
+$Selection.Style = $Heading2
+$Selection.TypeText("Replication")
 $Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 $BackupFailed = 0
@@ -1088,14 +1125,19 @@ if ($TableArray){
 }
 else {
     $Selection.TypeParagraph()
-    $Selection.TypeText("No Replication Jobs found.")  
+    if ($SkipVaults) {
+        $Selection.TypeText("No Vault information selected.") 
+    }
+    else {
+        $Selection.TypeText("No Replication Jobs found.") 
+    }
 }
 
 Write-Output "Creating Firewall table"
 
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
-$Selection.TypeText("Azure Firewall")
+$Selection.TypeText("Firewall")
 $Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 
@@ -1147,9 +1189,9 @@ foreach ($FW in $FWs) {
 				}	
 				if ($FWRule.TranslatedAddress) { $TableMember | Add-Member -MemberType NoteProperty -Name translated -Value $FWRule.TranslatedAddress -force }
 				if ($FWRule.TranslatedFqdn) { $TableMember | Add-Member -MemberType NoteProperty -Name translated -Value $FWRule.TranslatedFqdn -force }
-				if ($FWRule.translatedPort) { $TableMember | Add-Member -MemberType NoteProperty -Name translatedPort -Value $FWRule.translatedPort -force }				
+				if ($FWRule.translatedPort) { $TableMember | Add-Member -MemberType NoteProperty -Name translatedPort -Value $FWRule.translatedPort -force }
+                $TableArray.Add($TableMember) | Out-Null
 			}
-			$TableArray.Add($TableMember) | Out-Null
 		}
 	}
 }
@@ -1182,8 +1224,10 @@ Else {
 }
 
 
+Write-Output "Creating IP Groups table"
 $AllIPGroups = get-azipgroup
 if ($ALLIPGroups) {
+    $TableArray = [System.Collections.ArrayList]@()
     $Selection.Style = $Heading2
     $Selection.TypeText("Groups")
     $Selection.TypeParagraph()
@@ -1207,6 +1251,200 @@ if ($ALLIPGroups) {
     $TableArray  = $TableArray | Sort-Object Name
     $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Members -Headers "Name", "Members"
     FindWordDocumentEnd
+}
+### Get NAT gateway information
+Write-Output "Creating NAT gateway table"
+$NatGateways = Get-AzNatGateway
+
+if ($NatGateways) {
+    $TableArray = [System.Collections.ArrayList]@()
+    $Selection.Style = $Heading1
+    $Selection.TypeText("NAT gateway")
+    $Selection.TypeParagraph()
+    FindWordDocumentEnd
+    foreach ($NatGateway in $NatGateways) {
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $NatGateway.Name
+        $TableMember | Add-Member -type NoteProperty -name RG -Value $NatGateway.ResourceGroupName
+        $Parts = $NatGateway.PublicIpAddresses.ID.Split("/")
+        $Value = $Parts[8]
+        $TableMember | Add-Member -type NoteProperty -name IP -Value $Value
+        $TableArray.Add($TableMember) | Out-Null
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG, IP -Headers "Name", "ResourceGroup", "PublicIP"
+    FindWordDocumentEnd
+}
+Write-Output "Creating Bastion table"
+$Bastions = Get-AzBastion
+$Selection.Style = $Heading1
+$Selection.TypeText("Bastion")
+$Selection.TypeParagraph()
+if ($Bastions) {
+    FindWordDocumentEnd
+    $TableArray = [System.Collections.ArrayList]@()
+    foreach ($Bastion in $Bastions) {
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $Bastion.Name
+        $TableMember | Add-Member -type NoteProperty -name RG -Value $Bastion.ResourceGroupName
+        $TableMember | Add-Member -type NoteProperty -name PrivAlloc -Value $Bastion.IpConfigurations.PrivateIpAllocationMethod
+        $TableArray.Add($TableMember) | Out-Null
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG, PrivAlloc -Headers "Name", "ResourceGroup", "PrivAllocMeth"
+    FindWordDocumentEnd
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No bastion found.")       
+}
+$ALLVirtualNetworks = Get-AzVirtualNetwork
+$Selection.Style = $Heading1
+$Selection.TypeText("Network")
+$Selection.TypeParagraph()
+if ($ALLVirtualNetworks) {
+    FindWordDocumentEnd
+    $TableArray = [System.Collections.ArrayList]@()
+    foreach ($VirtualNetwork in $ALLVirtualNetworks) {
+        foreach ($Subnet in $VirtualNetwork.Subnets) {
+            $TableMember = New-Object System.Object;
+            $TableMember | Add-Member -type NoteProperty -name VNName -Value $VirtualNetwork.Name
+            $TableMember | Add-Member -type NoteProperty -name SubName -Value $Subnet.Name
+            $TableMember | Add-Member -type NoteProperty -name Address -Value $Subnet.AddressPrefix
+            if ($Subnet.NatGateway.Id) {
+                $Parts = $Subnet.NatGateway.Id.Split("/")
+                $Value = $Parts[8]
+                $TableMember | Add-Member -type NoteProperty -name NAT -Value $Value
+            }
+            else {
+                $TableMember | Add-Member -type NoteProperty -name NAT -Value "None"
+            }
+            $TableArray.Add($TableMember) | Out-Null
+        }
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns VNName, RG, SubName, Address, NAT -Headers "Virtual Network", "ResourceGroup", "Subnet Name", "IP Address", "NAT"
+    FindWordDocumentEnd        
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No network found.")       
+}
+Write-Output "Getting Load Balancers"
+$ALLLBs = Get-AzLoadBalancer
+$Selection.Style = $Heading1
+$Selection.TypeText("LoadBalancers")
+$Selection.TypeParagraph()
+FindWordDocumentEnd
+if ($ALLLBs) {
+    $TableArray = [System.Collections.ArrayList]@()
+    foreach ($LB in $ALLLBs) { 
+        $TableMember = New-Object System.Object;
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $LB.Name
+        $TableMember | Add-Member -type NoteProperty -name RG -Value $LB.ResourceGroupName
+        $TableArray.Add($TableMember) | Out-Null
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG -Headers "LB Name", "ResourceGroup"
+    FindWordDocumentEnd
+    $Selection.TypeParagraph()
+    foreach ($LB in $ALLLBs) {
+        ## Add Heading for each NSG
+        $Selection.Style = $Heading2
+        $Selection.TypeText($LB.Name)
+        $Selection.TypeParagraph()
+        $TableArray = [System.Collections.ArrayList]@()
+        $Selection.Style = $Heading3
+        $Selection.TypeText("Frontend")
+        $Selection.TypeParagraph()
+        foreach ($FrontendIPConfig in  $LB.FrontendIpConfigurations) {
+            $TableMember = New-Object System.Object;
+            $TableMember | Add-Member -type NoteProperty -name Name -Value $FrontendIPConfig.Name
+            $TableMember | Add-Member -type NoteProperty -name PrivIP -Value $FrontendIPConfig.PrivateIpAddress
+            if ($FrontendIPConfig.PublicIpAddress) {
+                $TableMember | Add-Member -type NoteProperty -name PubIP -Value $FrontendIPConfig.PublicIpAddress
+            }
+            else {
+                $TableMember | Add-Member -type NoteProperty -name PubIP -Value "none"
+            }
+            $Parts = $FrontendIPConfig.subnet.ID.Split("/")
+            $TableMember | Add-Member -type NoteProperty -name subnet -Value $Parts[8]
+            $Parts = $FrontendIPConfig.loadbalancingrules.ID.Split("/")
+            $TableMember | Add-Member -type NoteProperty -name LBRule -Value $Parts[10]
+            $TableArray.Add($TableMember) | Out-Null
+        }
+        $TableArray  = $TableArray | Sort-Object Name
+        $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, PrivIP, PubIP, subnet, LBRule -Headers "Name", "Private IP", "Public IP", "subnet", "LB Rule"
+        FindWordDocumentEnd
+        $TableArray = [System.Collections.ArrayList]@()
+        $Selection.Style = $Heading3
+        $Selection.TypeText("Backend")
+        $Selection.TypeParagraph()
+        foreach ($BackendAddressPool in $LB.BackendAddressPools) {
+            foreach ($BackendIPConfig in $BackendAddressPool.BackendIpConfigurations) {
+                $Parts = $BackendIPConfig.ID.Split("/")
+                $VirtualMachineName = FindVM $Parts[8]
+                $TableMember = New-Object System.Object;
+                $TableMember | Add-Member -type NoteProperty -name Name -Value $BackendAddressPool.Name
+                $TableMember | Add-Member -type NoteProperty -name Nic -Value $Parts[10]
+                $TableMember | Add-Member -type NoteProperty -name VM -Value $VirtualMachineName
+                if ($BackendIPConfig.PrivateIpAddress) {
+                    $Value = $BackendIPConfig.PrivateIpAddress
+                }
+                else {
+                    $Value = "none"
+                }
+                if ($value -eq "none") {
+                    #BackendIPconfig has no data. Trying alternative mode
+                    $Nic = Get-AzNetworkInterface -Name $Parts[8]
+                    $Value = $nic.IpConfigurations[0].PrivateIpAddress
+                }
+                $TableMember | Add-Member -type NoteProperty -name PrivIP -Value $Value
+                $TableArray.Add($TableMember) | Out-Null
+            } 
+        }
+        $TableArray  = $TableArray | Sort-Object Name
+        $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, PrivIP, Nic, VM -Headers "Name", "Private IP", "nic", "Virtual Machine"
+        FindWordDocumentEnd
+        $TableArray = [System.Collections.ArrayList]@()
+        $Selection.Style = $Heading3
+        $Selection.TypeText("LoadBalancer Probes")
+        $Selection.TypeParagraph()
+        foreach ($LBProbe in $LB.Probes) {
+            $TableMember = New-Object System.Object;
+            $TableMember | Add-Member -type NoteProperty -name Name -Value $LBProbe.Name
+            $TableMember | Add-Member -type NoteProperty -name Prot -Value $LBProbe.Protocol
+            $TableMember | Add-Member -type NoteProperty -name Port -Value $LBProbe.Port
+            $TableMember | Add-Member -type NoteProperty -name Int -Value $LBProbe.IntervalInSeconds
+            $TableArray.Add($TableMember) | Out-Null
+        }
+        $TableArray  = $TableArray | Sort-Object Name
+        $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Prot, Port, Int -Headers "Name", "Protocol", "Port", "Interval (s)"
+        FindWordDocumentEnd
+        $TableArray = [System.Collections.ArrayList]@()
+        $Selection.Style = $Heading3
+        $Selection.TypeText("LoadBalancer Rules")
+        $Selection.TypeParagraph()
+        foreach ($LBRule in $LB.loadbalancingrules) {
+            $TableMember = New-Object System.Object;
+            $TableMember | Add-Member -type NoteProperty -name Name -Value $LBRule.Name
+            $TableMember | Add-Member -type NoteProperty -name Prot -Value $LBRule.Protocol
+            $TableMember | Add-Member -type NoteProperty -name FP -Value $LBRule.FrontendPort
+            $TableMember | Add-Member -type NoteProperty -name BP -Value $LBRule.BackendPort
+            $TableMember | Add-Member -type NoteProperty -name Timeout -Value $LBRule.IdleTimeoutInMinutes
+            $Parts = $LBRule.Probe.ID.Split("/")
+            $TableMember | Add-Member -type NoteProperty -name Probe -Value $Parts[10]
+            $TableArray.Add($TableMember) | Out-Null
+        }
+        $TableArray  = $TableArray | Sort-Object Name
+        $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Prot, Fp, BP, Timeout, Probe -Headers "Name", "Protocol", "Frontend Port", "Backend Port", "Timeout", "Probe"
+        FindWordDocumentEnd
+        $Selection.TypeParagraph()
+    }
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No load balancers found.")       
 }
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
