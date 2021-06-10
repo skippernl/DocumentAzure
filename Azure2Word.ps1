@@ -743,8 +743,8 @@ $Selection.TypeParagraph()
 Write-Output "Getting VPN Gateway Connections"
 $NetworkConnections = $ALLAzureResources | Where-Object {$_.ResourceType -eq "Microsoft.Network/connections" } | Sort-Object Name
 Foreach ($NetworkConnection in $NetworkConnections) {
-    $NSG = Get-AzVirtualNetworkGatewayConnection -ResourceName $NetworkConnection.ResourceName -ResourceGroupName $NetworkConnection.ResourceGroupName
-    $NetworkGatewayConnections.Add($NSG) | Out-Null
+    $NGC = Get-AzVirtualNetworkGatewayConnection -ResourceName $NetworkConnection.ResourceName -ResourceGroupName $NetworkConnection.ResourceGroupName
+    $NetworkGatewayConnections.Add($NGC) | Out-Null
 }
 $NetworkGatewayConnections = $NetworkGatewayConnections | Sort-Object Name
 $TableArray = [System.Collections.ArrayList]@()
@@ -754,13 +754,36 @@ $TableArray = [System.Collections.ArrayList]@()
 ########
 ## Values
 Write-Output "Creating VPN table"
+$ExpressRouteFound=$False
 Foreach ($NGC in $NetworkGatewayConnections) {
     $TableMember = New-Object System.Object;
     $ResourceGroupName = $NGC.ResourceGroupName
     $Parts = $NGC.VirtualNetworkGateway1.id.Split("/")
     $AzEndpoint = $Parts[8]
-    $Parts = $NGC.LocalNetworkGateway2.id.Split("/")
-    $LocalEndpoint = $Parts[8]
+    if ($NGC.VirtualNetworkGateway2.id) {
+        $Parts = $NGC.LocalNetworkGateway2.id.Split("/")
+        $LocalEndpoint = $Parts[8]
+        $Expressroute = "No"
+    }
+    else {
+        #no endpoint Could it be an Expressroute?
+        if ($NGC.Peer) {
+            $Parts = $NGC.Peer.ID.Split("/")
+            if ($Parts[7] -eq "expressRouteCircuits") {
+                $Expressroute = "Yes"
+                $LocalEndpoint = $Parts[8]
+                $ExpressRouteFound=$True
+            }
+            Else {
+                $Expressroute = "No"
+                $LocalEndpoint = "Empty"
+            }
+        }
+        Else {
+            $Expressroute = "No"
+            $LocalEndpoint = "Empty"
+        }
+    }
     if (!($LocalEndPointResourceGroupNames.Contains($ResourceGroupName))) { $LocalEndPointResourceGroupNames.Add($ResourceGroupName) | Out-Null }
     $TableMember | Add-Member -type NoteProperty -name VPN -Value $NGC.Name
     $TableMember | Add-Member -type NoteProperty -name RGN -Value $ResourceGroupName
@@ -785,6 +808,43 @@ else {
 }
 FindWordDocumentEnd
 $Selection.TypeParagraph()
+if ($ExpressRouteFound) {
+    $Selection.Style = $Heading2
+    $Selection.TypeText("ExpressRoutes")
+    $Selection.TypeParagraph()
+    $Selection.TypeParagraph()
+    $ExpressRoutes = Get-AzExpressRouteCircuit
+    foreach ($ExpressRoute in $ExpressRoutes) {
+        $Selection.TypeText("Name :$($ExpressRoute.Name)")
+        $Selection.TypeParagraph()
+        $Selection.TypeText("Location :$($ExpressRoute.Location)")
+        $Selection.TypeParagraph()
+        $Selection.TypeText("ProvisioningState :$($ExpressRoute.ProvisioningState)")
+        $Selection.TypeParagraph()
+        $Selection.TypeText("ServiceProviderProperties")
+        $Selection.TypeParagraph()
+        $Selection.TypeText("ServiceProviderName $($ExpressRoute.ServiceProviderProperties.ServiceProviderName)")
+        $Selection.TypeParagraph()        
+        $Selection.TypeText("PeeringLocation $($ExpressRoute.ServiceProviderProperties.PeeringLocation)")
+        $Selection.TypeParagraph() 
+        $Selection.TypeText("BandwidthInMbps $($ExpressRoute.ServiceProviderProperties.BandwidthInMbps)")
+        $Selection.TypeParagraph() 
+        $Selection.TypeText("AzureASN $($ExpressRoute.Peerings.AzureASN)")
+        $Selection.TypeParagraph() 
+        $Selection.TypeText("PeerASN $($ExpressRoute.Peerings.PeerASN)")
+        $Selection.TypeParagraph()    
+        $Selection.TypeText("PrimaryPeerAddressPrefix $($ExpressRoute.Peerings.PrimaryPeerAddressPrefix)")
+        $Selection.TypeParagraph()    
+        $Selection.TypeText("SecondaryPeerAddressPrefix $($ExpressRoute.Peerings.SecondaryPeerAddressPrefix)")
+        $Selection.TypeParagraph()    
+        $Selection.TypeText("PrimaryAzurePort $($ExpressRoute.Peerings.PrimaryAzurePort)")
+        $Selection.TypeParagraph()    
+        $Selection.TypeText("SecondaryAzurePort $($ExpressRoute.Peerings.SecondaryAzurePort)")
+        $Selection.TypeParagraph()    
+        $Selection.TypeText("SecondaryPeerAddressPrefix $($ExpressRoute.Peerings.SecondaryPeerAddressPrefix)")
+        $Selection.TypeParagraph()         
+    }
+}
 
 $Selection.Style = $Heading2
 $Selection.TypeText("VPN Local Gateways")
@@ -886,60 +946,120 @@ $Selection.InsertNewPage()
 $Selection.Style = $Heading1
 $Selection.TypeText("Backup and Replication")
 $Selection.TypeParagraph()
-if (!($SkipVaults)) {$Vaults = Get-AzRecoveryServicesVault | Sort-Object Name }
-########
-######## Create a table the backupjobs found
-########
+if ($SkipVaults) {
+    $Selection.TypeText("No Vault information selected.") 
+    $Selection.TypeParagraph()
+    Write-Output "Skipping Vault information"
+}
+else {
+    $Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
+    ########
+    ######## Create a table the backupjobs found
+    ########
 
-## Values
-#Get Only Restore points of the last week.
-$startDate = (Get-Date).AddDays(-7)
-$endDate = Get-Date
-Write-Output "Creating Backup job table"
-$Selection.Style = $Heading2
-$Selection.TypeText("Backup")
-$Selection.TypeParagraph()
-$TableArray = [System.Collections.ArrayList]@()
-$BackupFailed = 0
-$BackupJobFailed = $null
-$CounterVault = 1
-$MaxCounterVault=$Vaults.Count
-Foreach ($Vault in $Vaults) {
-    $ProcVault = $CounterVault/$MaxCounterVault*100
-    $ProcVaultString = $ProcVault.ToString("0.00")
-    Write-Progress -ID 0 -Activity "Checking vault $CounterVault/$MaxCounterVault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
-    $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
-    $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
-    $CounterVault++
-    $CounterBackupJob = 1
-    $MaxCounterBackupJob = $BackupJobs.Count
-    $Activity = $null
-    ForEach ($BackupJob in $BackupJobs) {
-        $TableMember = New-Object System.Object;
-
-        $ProcBackup = $CounterBackupJob/$MaxCounterBackupJob*100
-        $ProcBackupString = $ProcBackup.ToString("0.00")
-        $Activity = "Checking backup job $CounterBackupJob/$MaxCounterBackupJob $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" 
-        Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcBackup)
-        #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
-        $CounterBackupJob++
-        $rp = @()
-        switch ($BackupJob.BackupManagementType) {
-            "AzureVM" {
-                foreach ($namedContainer in $namedContainerVMs) {
-                    #Friendly name can be in multiple namedcontainers
-                    if ($BackupJob.workloadname.ToUpper() -eq $namedContainer.FriendlyName.ToUpper()) {
-                        $BackupnamedContainer = $namedContainer
-                        $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
-                        $rp += Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+    ## Values
+    #Get Only Restore points of the last week.
+    $startDate = (Get-Date).AddDays(-7)
+    $endDate = Get-Date
+    Write-Output "Creating Backup job table"
+    $Selection.Style = $Heading2
+    $Selection.TypeText("Backup")
+    $Selection.TypeParagraph()
+    $TableArray = [System.Collections.ArrayList]@()
+    $BackupPolicies = [System.Collections.ArrayList]@()
+    $ASRPolicies = [System.Collections.ArrayList]@()
+    $BackupFailed = 0
+    $BackupJobFailed = $null
+    $CounterVault = 1
+    $MaxCounterVault=$Vaults.Count
+    Foreach ($Vault in $Vaults) {
+        #Fill the Replication fabric (No need to run to all the vaults twice)
+        Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
+        $ASRFabrics += Get-AzRecoveryServicesAsrFabric
+        $BackupPolicy = Get-AzRecoveryServicesBackupProtectionPolicy -VaultID $Vault.ID
+        $BackupPolicies.Add($BackupPolicy) | Out-Null
+        $ASRPolicy = Get-AzRecoveryServicesAsrPolicy
+        if ($null -ne $ASRPolicy) { $ASRPolicies.Add($ASRPolicy) | Out-Null }
+        #End fill Replication Fabric
+        $ProcVault = $CounterVault/$MaxCounterVault*100
+        $ProcVaultString = $ProcVault.ToString("0.00")
+        Write-Progress -ID 0 -Activity "Checking vault $CounterVault/$MaxCounterVault $($Vault.Name) ($ProcVaultString%)" -PercentComplete ($ProcVault)
+        $BackupJobs = Get-AzRecoveryServicesBackupJob -VaultId $Vault.ID
+        $namedContainerVMs = Get-AzRecoveryServicesBackupContainer  -ContainerType "AzureVM" -Status "Registered" -VaultId $Vault.ID
+        $CounterVault++
+        $CounterBackupJob = 1
+        $MaxCounterBackupJob = $BackupJobs.Count
+        $Activity = $null
+        ForEach ($BackupJob in $BackupJobs) {
+            $TableMember = New-Object System.Object;
+            $ProcBackup = $CounterBackupJob/$MaxCounterBackupJob*100
+            $ProcBackupString = $ProcBackup.ToString("0.00")
+            $Activity = "Checking backup job $CounterBackupJob/$MaxCounterBackupJob $($BackupJob.WorkloadName.ToUpper()) ($ProcBackupString%)" 
+            Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcBackup)
+            #There can be multiple Restore Points due to the fact that there could be more Jobs (after changing resource group etc)
+            $CounterBackupJob++
+            $rp = @()
+            switch ($BackupJob.BackupManagementType) {
+                "AzureVM" {
+                    foreach ($namedContainer in $namedContainerVMs) {
+                        #Friendly name can be in multiple namedcontainers
+                        if ($BackupJob.workloadname.ToUpper() -eq $namedContainer.FriendlyName.ToUpper()) {
+                            $BackupnamedContainer = $namedContainer
+                            $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
+                            $rp += Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                        }
+                    }
+                    $WorkloadName = $BackupJob.workloadname.ToUpper()
+                    if ($rp) {
+                        $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                    }
+                    else {
+                        if ($BackupJob.Operation -eq "ConfigureBackup") {
+                            $LatestRestorePoint = "Configuring"
+                        }
+                        else {
+                            $LatestRestorePoint = "Unkown"
+                        }
                     }
                 }
-                $WorkloadName = $BackupJob.workloadname.ToUpper()
-                
-                if ($rp) {
-                    $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                "AzureWorkload" {
+                    $WorkloadArray = $BackupJob.workloadname.Split(" ")
+                    if ($WorkloadArray.Count -eq 2) {
+                        $SQLDatabase = $WorkloadArray[0]
+                        $SQLServer = $WorkloadArray[1].Substring(1,$WorkloadArray[1].Length-2)
+                    }
+                    else {
+                        $SQLDatabase = $BackupJob.workloadname
+                        $SQLServer = "FirstBackup"                 
+                    }
+                    #As we are checking for a database we might get more than one result. 
+                    $bkpItems = Get-AzRecoveryServicesBackupItem -BackupManagementType $BackupJob.BackupManagementType -WorkloadType MSSQL -Name $SQLDatabase -VaultId $Vault.ID
+                    if ($BackupJob.Operation -eq "ConfigureBackup") {
+                        $LatestRestorePoint = "Configuring"
+                    }
+                    else {
+                        $LatestRestorePoint = "Unkown"
+                    }
+                    $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
+                    foreach ($backupitem in $bkpItems) {
+                        $ServerNameArray=$backupitem.ServerName.Split(".")
+                        if ($ServerNameArray[0] -eq $SQLServer){ 
+                            $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                            if ($rp) {
+                                $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+                            }
+                            else {
+                                if ($BackupJob.Operation -eq "ConfigureBackup") {
+                                    $LatestRestorePoint = "Configuring"
+                                }
+                                else {
+                                    $LatestRestorePoint = "Unkown"
+                                }
+                            }
+                        }
+                    }  
                 }
-                else {
+                default {
                     if ($BackupJob.Operation -eq "ConfigureBackup") {
                         $LatestRestorePoint = "Configuring"
                     }
@@ -948,189 +1068,343 @@ Foreach ($Vault in $Vaults) {
                     }
                 }
             }
-            "AzureWorkload" {
-                $WorkloadArray = $BackupJob.workloadname.Split(" ")
-                if ($WorkloadArray.Count -eq 2) {
-                    $SQLDatabase = $WorkloadArray[0]
-                    $SQLServer = $WorkloadArray[1].Substring(1,$WorkloadArray[1].Length-2)
-                }
-                else {
-                    $SQLDatabase = $BackupJob.workloadname
-                    $SQLServer = "FirstBackup"                 
-                }
-                #As we are checking for a database we might get more than one result. 
-                $bkpItems = Get-AzRecoveryServicesBackupItem -BackupManagementType $BackupJob.BackupManagementType -WorkloadType MSSQL -Name $SQLDatabase -VaultId $Vault.ID
-                if ($BackupJob.Operation -eq "ConfigureBackup") {
-                    $LatestRestorePoint = "Configuring"
-                }
-                else {
-                    $LatestRestorePoint = "Unkown"
-                }
-                $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
-                foreach ($backupitem in $bkpItems) {
-                    $ServerNameArray=$backupitem.ServerName.Split(".")
-                    if ($ServerNameArray[0] -eq $SQLServer){ 
-                        $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
-                        if ($rp) {
-                            $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
-                        }
-                        else {
-                            if ($BackupJob.Operation -eq "ConfigureBackup") {
-                                $LatestRestorePoint = "Configuring"
-                            }
-                            else {
-                                $LatestRestorePoint = "Unkown"
-                            }
-                        }
-                    }
-                }  
-            }
-            default {
-                if ($BackupJob.Operation -eq "ConfigureBackup") {
-                    $LatestRestorePoint = "Configuring"
-                }
-                else {
-                    $LatestRestorePoint = "Unkown"
-                }
-            }
-        }
-        $TableMember | Add-Member -type NoteProperty -name Name -Value $Vault.Name
-        $TableMember | Add-Member -type NoteProperty -name Workload -Value $WorkloadName
-        $TableMember | Add-Member -type NoteProperty -name Status -Value $BackupJob.Status
-        $TableMember | Add-Member -type NoteProperty -name StartTime -Value $BackupJob.StartTime.ToString()
-        if ($BackupJob.Status -eq "InProgress") {
-            $BackupJobEndTime = "-"
-        }
-        else {
-            $BackupJobEndTime = $BackupJob.EndTime.ToString()
-        }
-        if ($BackupJob.Status -eq "failed") {
-            $BackupFailed++
-            if ($BackupJobFailed -eq 1) {
-                $BackupJobFailed = $BackupJobFailed + ", $WorkloadName"
+            $TableMember | Add-Member -type NoteProperty -name Name -Value $Vault.Name
+            $TableMember | Add-Member -type NoteProperty -name Workload -Value $WorkloadName
+            $TableMember | Add-Member -type NoteProperty -name Status -Value $BackupJob.Status
+            $TableMember | Add-Member -type NoteProperty -name StartTime -Value $BackupJob.StartTime.ToString()
+            if ($BackupJob.Status -eq "InProgress") {
+                $BackupJobEndTime = "-"
             }
             else {
-                $BackupJobFailed = $WorkloadName
+                $BackupJobEndTime = $BackupJob.EndTime.ToString()
             }
+            if ($BackupJob.Status -eq "failed") {
+                $BackupFailed++
+                if ($BackupJobFailed -eq 1) {
+                    $BackupJobFailed = $BackupJobFailed + ", $WorkloadName"
+                }
+                else {
+                    $BackupJobFailed = $WorkloadName
+                }
+            }
+            $TableMember | Add-Member -type NoteProperty -name EndTime -Value $BackupJobEndTime
+            $TableMember | Add-Member -type NoteProperty -name RP -Value $LatestRestorePoint
+            $TableArray.Add($TableMember) | Out-Null
         }
-        $TableMember | Add-Member -type NoteProperty -name EndTime -Value $BackupJobEndTime
-        $TableMember | Add-Member -type NoteProperty -name RP -Value $LatestRestorePoint
-        $TableArray.Add($TableMember) | Out-Null
+        if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
     }
-    if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
-}
-FindWordDocumentEnd
-if ($TableArray){ 
-    $TableArray = $TableArray | Sort-Object Name, Workload
-    $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, Workload, Status, StartTime, EndTime, RP -Headers "Vault", "Backup Item", "Status", "Start Time (UTC)", "End Time (UTC)", "Latest RestorePoint (UTC)"
     FindWordDocumentEnd
-    $Selection.TypeParagraph()
-    switch ($backupFailed) {
-        1 { 
-            $Selection.TypeText("One failed backup where found!")
-            $Selection.TypeText("The job that failed is: $BackupJobFailed.")   
-            $Selection.TypeParagraph()
+    if ($TableArray){ 
+        $TableArray = $TableArray | Sort-Object Name, Workload
+        $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, Workload, Status, StartTime, EndTime, RP -Headers "Vault", "Backup Item", "Status", "Start Time (UTC)", "End Time (UTC)", "Latest RestorePoint (UTC)"
+        FindWordDocumentEnd
+        $Selection.TypeParagraph()
+        switch ($backupFailed) {
+            1 { 
+                $Selection.TypeText("One failed backup where found!")
+                $Selection.TypeText("The job that failed is: $BackupJobFailed.")   
+                $Selection.TypeParagraph()
+            }
+            2 {
+                $Selection.TypeText("Two or more failed backups where found!")
+                $Selection.TypeText("The jobs that failed are $BackupJobFailed.")   
+                $Selection.TypeParagraph()
+            }
+            Default {}
         }
-        2 {
-            $Selection.TypeText("Two or more failed backups where found!")
-            $Selection.TypeText("The jobs that failed are $BackupJobFailed.")   
-            $Selection.TypeParagraph()
-        }
-        Default {}
-    }
-    if ($BackupFailed -eq 1) {
-
     }
     else {
-
-    }
-}
-else {
-    $Selection.TypeParagraph()
-    if ($SkipVaults) {
-        $Selection.TypeText("No Vault information selected.") 
-    }
-    else {
+        $Selection.TypeParagraph()
         $Selection.TypeText("No Backups found.") 
     }
-}
-FindWordDocumentEnd
-$Selection.TypeParagraph()
-
-Write-Output "Creating Replication job table"
-#Adding recovery information
-#Only get information from last 24h
-$startDate = (Get-Date).AddDays(-1)
-$endDate = Get-Date
-$Selection.InsertNewPage()
-$Selection.Style = $Heading2
-$Selection.TypeText("Replication")
-$Selection.TypeParagraph()
-$TableArray = [System.Collections.ArrayList]@()
-$BackupFailed = 0
-$BackupJobFailed = $null
-$ASRFabrics = [System.Collections.ArrayList]@()
-
-foreach ($Vault in $Vaults) {
-    Set-AzRecoveryServicesAsrVaultContext -Vault $vault | Out-Null
-    $ASRFabrics += Get-AzRecoveryServicesAsrFabric
-}
-#$ASRFabrics = Get-AzRecoveryServicesAsrFabric
-$CounterASRFabrics = 1
-$MaxCounterASRFabrics = $ASRFabrics.Count
-Foreach ($ASRFabric in $ASRFabrics) {  
-    $ProcASRFabric = $CounterASRFabrics/$MaxCounterASRFabrics*100
-    $ProcASRFabricString = $ProcASRFabric.ToString("0.00") 
-    $ASRActivity = "ASR Fabric $($ASRFabric.FriendlyName) ($ProcASRFabricString%)"
-    Write-Progress -ID 0 -Activity $ASRActivity -PercentComplete ($ProcASRFabric)
-    $ProtectionContainers = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $ASRFabric
-    $Activity = $null
-    if ($ProtectionContainers) {
-        foreach ($ProtectionContainer in $ProtectionContainers) {
-            $ProtectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $ProtectionContainer
-            $CounterProtectedItems = 1
-            $MaxCounterProtectedItems = $ProtectedItems.Count
-            foreach ($ProtectedItem in $ProtectedItems) {
-                $ProcProtectedItems = $CounterProtectedItems/$MaxCounterProtectedItems*100
-                $ProcPProtectedItemString = $ProcProtectedItems.ToString("0.00")
-                
-                $TableMember = New-Object System.Object;
-
-                $ReplVM = Get-AzRecoveryServicesAsrReplicationProtectedItem -FriendlyName $ProtectedItem.FriendlyName -ProtectionContainer $ProtectionContainer
-                $Activity = "Checking ASR $CounterProtectedItems/$MaxCounterProtectedItems for $($ReplVM.RecoveryAzureVMName) ($ProcPProtectedItemString%)"
-                Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcProtectedItems)
-                $CounterProtectedItems++
-                $RecoveryPoints = Get-AzRecoveryServicesAsrRecoveryPoint -ReplicationProtectedItem $ReplVM
-                $LastRecoveryPoint=$RecoveryPoints[$RecoveryPoints.count-1]
-
-                $TableMember | Add-Member -type NoteProperty -name Location -Value $ReplVM.RecoveryFabricFriendlyName
-                $TableMember | Add-Member -type NoteProperty -name Server -Value $ReplVM.RecoveryAzureVMName
-                $TableMember | Add-Member -type NoteProperty -name State -Value $LastRecoveryPoint.RecoveryPointType
-                $TableMember | Add-Member -type NoteProperty -name RPTime -Value $LastRecoveryPoint.RecoveryPointTime
-                $TableMember | Add-Member -type NoteProperty -name Policy -Value $ReplVM.PolicyFriendlyName
-                $TableMember | Add-Member -type NoteProperty -name LastOKTest -Value $ReplVM.LastSuccessfulTestFailoverTime
-                $TableArray.Add($TableMember) | Out-Null
+    $Selection.Style = $Heading3
+    $Selection.TypeText("Backup Policy")
+    $Selection.TypeParagraph()
+    If ($BackupPolicies) {
+        $TableArray = [System.Collections.ArrayList]@()
+        foreach ($BackupPolicy in $BackupPolicies) {
+            foreach ($BackupSchedule in $BackupPolicy) {
+                $Selection.TypeParagraph()
+                $Selection.TypeText("$($BackupSchedule.Name)")
+                $Selection.TypeParagraph()
+                $Selection.TypeText("$($BackupSchedule.WorkloadType)")
+                $Selection.TypeParagraph()
+                switch ($BackupSchedule.WorkloadType) {
+                    "AzureVM" {     
+                        $BackupSchRP = $BackupSchedule.RetentionPolicy
+                        if ($BackupSchRP.IsDailyScheduleEnabled) {
+                            $Selection.TypeText("Daily Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Days   : $($BackupSchRP.DailySchedule.DurationCountInDays)")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.DailySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Daily Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsWeeklyScheduleEnabled) { 
+                            $Selection.TypeText("Weekly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Weeks  : $($BackupSchRP.WeeklySchedule.DurationCountInWeeks)")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.WeeklySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.WeeklySchedule.DaysOfTheWeek
+                            $Selection.TypeText("  Days of Week             : $DayOfWeek")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Weekly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsMonthlyScheduleEnabled) {
+                            $Selection.TypeText("Monthly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Months : $($BackupSchRP.MonthlySchedule.DurationCountInMonths)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionType            : $($BackupSchRP.MonthlySchedule.RetentionScheduleFormatType)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionDaily           : $($BackupSchRP.MonthlySchedule.RetentionScheduleDaily)")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.MonthlySchedule.DaysOfTheWeek
+                            $Week = ArrayToLine $BackupSchRP.MonthlySchedule.WeeksOfTheMonth
+                            $Selection.TypeText("  RetentionWeekly          : $DayOfWeek $Week")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Monthly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsYearlyScheduleEnabled) {
+                            $Selection.TypeText("Yearly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Years  : $($BackupSchRP.YearlySchedule.DurationCountInYears)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionType            : $($BackupSchRP.YearlySchedule.RetentionScheduleFormatType)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionDaily           : $($BackupSchRP.YearlySchedule.RetentionScheduleDaily)")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.YearlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
+                            $Week = ArrayToLine $BackupSchRP.YearlySchedule.RetentionScheduleWeekly.WeeksOfTheMonth
+                            $Selection.TypeText("  RetentionWeekly          : $DayOfWeek $Week")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.YearlySchedule.MonthsOfYear
+                            $Selection.TypeText("  RetentionYearly          : $Value")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.YearlySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Yearly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                    }
+                    "MSSQL" {
+                        $Selection.TypeText("Full Backup.")
+                        $Selection.TypeParagraph()
+                        $BackupSchRP = $BackupSchedule.FullBackupRetentionPolicy
+                        if ($BackupSchRP.IsDailyScheduleEnabled) {
+                            $Selection.TypeText("Daily Schedule enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Days   : $($BackupSchRP.DailySchedule.DurationCountInDays)")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.DailySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Daily Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsWeeklyScheduleEnabled) { 
+                            $Selection.TypeText("Weekly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Weeks  : $($BackupSchRP.WeeklySchedule.DurationCountInWeeks)")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.WeeklySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.WeeklySchedule.DaysOfTheWeek
+                            $Selection.TypeText("  Days of Week             : $DayOfWeek")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Weekly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsMonthlyScheduleEnabled) {
+                            $Selection.TypeText("Monthly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Months : $($BackupSchRP.MonthlySchedule.DurationCountInMonths)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionType            : $($BackupSchRP.MonthlySchedule.RetentionScheduleFormatType)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionDaily           : $($BackupSchRP.MonthlySchedule.RetentionScheduleDaily)")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
+                            $Week = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
+                            $Selection.TypeText("  RetentionWeekly          : $DayOfWeek $Week")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Monthly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchRP.IsYearlyScheduleEnabled) {
+                            $Selection.TypeText("Yearly Schedule is enabled.")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  Duration count in Years  : $($BackupSchRP.YearlySchedule.DurationCountInYears)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionType            : $($BackupSchRP.YearlySchedule.RetentionScheduleFormatType)")
+                            $Selection.TypeParagraph()
+                            $Selection.TypeText("  RetentionDaily           : $($BackupSchRP.YearlySchedule.RetentionScheduleDaily)")
+                            $Selection.TypeParagraph()
+                            $DayOfWeek = ArrayToLine $BackupSchRP.YearlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
+                            $Week = ArrayToLine $BackupSchRP.YearlySchedule.RetentionScheduleWeekly.WeeksOfTheMonth
+                            $Selection.TypeText("  RetentionWeekly          : $DayOfWeek $Week")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.YearlySchedule.MonthsOfYear
+                            $Selection.TypeText("  RetentionYearly          : $Value")
+                            $Selection.TypeParagraph()
+                            $Value = ArrayToLine $BackupSchRP.YearlySchedule.RetentionTimes
+                            $Selection.TypeText("  RetentionTime            : $Value")
+                            $Selection.TypeParagraph()
+                        }
+                        else  {
+                            $Selection.TypeText("Yearly Schedule is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchedule.IsLogBackupEnabled) {
+                            $Selection.TypeText("Log backup is enabled.")
+                            $Selection.TypeParagraph()   
+                            $Selection.TypeText("Log backups are made every $($BackupSchedule.LogBackupSchedulePolicy.ScheduleFrequencyInMins) minutes.")
+                            $Selection.TypeParagraph() 
+                            $RetentionCount = $BackupSchedule.LogBackupRetentionPolicy.RetentionCount  
+                            $RetentionType = $BackupSchedule.LogBackupRetentionPolicy.RetentionDurationType  
+                            $Selection.TypeText("Log backups are kept for $RetentionCount $RetentionType.")
+                            $Selection.TypeParagraph()            
+                        }
+                        else {
+                            $Selection.TypeText("Log backup is disabled.")
+                            $Selection.TypeParagraph()
+                        }
+                        if ($BackupSchedule.IsDifferentialBackupEnabled) {
+                            $Selection.TypeText("Differential backup is enabled.")
+                            $Selection.TypeParagraph()          
+                        }
+                        else {
+                            $Selection.TypeText("Differential backup is disabled.")
+                            $Selection.TypeParagraph()
+                        }                        
+                    }
+                    Default {}
+                }
             }
-        }   
-    }
-    if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
-    if ($Activity) { Write-Progress -ID 0 -Activity $ASRActivity -Status "Ready" -Completed }
-}
-FindWordDocumentEnd
-if ($TableArray){ 
-    $TableArray = $TableArray | Sort-Object Location,Server
-    $WordTable = AddWordTable -CustomObject $TableArray -Columns Location, Server, State, RPTime, Policy -Headers "Location", "Server", "Status", "Last Restore Point Time (UTC)", "Policy"
-    FindWordDocumentEnd
-    $Selection.TypeParagraph()
-}
-else {
-    $Selection.TypeParagraph()
-    if ($SkipVaults) {
-        $Selection.TypeText("No Vault information selected.") 
+        }
     }
     else {
+        $Selection.TypeParagraph()
+        $Selection.TypeText("No Backups Policies found.")         
+    }
+
+    Write-Output "Creating Replication job table"
+    #Adding recovery information
+    #Only get information from last 24h
+    $ASRFabrics += Get-AzRecoveryServicesAsrFabric
+    $startDate = (Get-Date).AddDays(-1)
+    $endDate = Get-Date
+    $Selection.InsertNewPage()
+    $Selection.Style = $Heading2
+    $Selection.TypeText("Replication")
+    $Selection.TypeParagraph()
+    $TableArray = [System.Collections.ArrayList]@()
+    $BackupFailed = 0
+    $BackupJobFailed = $null
+    $ASRFabrics = [System.Collections.ArrayList]@()
+    $ASRFabrics = Get-AzRecoveryServicesAsrFabric
+    $CounterASRFabrics = 1
+    $MaxCounterASRFabrics = $ASRFabrics.Count
+    Foreach ($ASRFabric in $ASRFabrics) {  
+        $ProcASRFabric = $CounterASRFabrics/$MaxCounterASRFabrics*100
+        $ProcASRFabricString = $ProcASRFabric.ToString("0.00") 
+        $ASRActivity = "ASR Fabric $($ASRFabric.FriendlyName) ($ProcASRFabricString%)"
+        Write-Progress -ID 0 -Activity $ASRActivity -PercentComplete ($ProcASRFabric)
+        $ProtectionContainers = Get-AzRecoveryServicesAsrProtectionContainer -Fabric $ASRFabric
+        $Activity = $null
+        if ($ProtectionContainers) {
+            foreach ($ProtectionContainer in $ProtectionContainers) {
+                $ProtectedItems = Get-AzRecoveryServicesAsrReplicationProtectedItem -ProtectionContainer $ProtectionContainer
+                $CounterProtectedItems = 1
+                $MaxCounterProtectedItems = $ProtectedItems.Count
+                foreach ($ProtectedItem in $ProtectedItems) {
+                    $ProcProtectedItems = $CounterProtectedItems/$MaxCounterProtectedItems*100
+                    $ProcPProtectedItemString = $ProcProtectedItems.ToString("0.00")
+                    $TableMember = New-Object System.Object;
+                    $ReplVM = Get-AzRecoveryServicesAsrReplicationProtectedItem -FriendlyName $ProtectedItem.FriendlyName -ProtectionContainer $ProtectionContainer
+                    $Activity = "Checking ASR $CounterProtectedItems/$MaxCounterProtectedItems for $($ReplVM.RecoveryAzureVMName) ($ProcPProtectedItemString%)"
+                    Write-Progress -ID 1 -Activity $Activity -PercentComplete ($ProcProtectedItems)
+                    $CounterProtectedItems++
+                    $RecoveryPoints = Get-AzRecoveryServicesAsrRecoveryPoint -ReplicationProtectedItem $ReplVM
+                    $LastRecoveryPoint=$RecoveryPoints[$RecoveryPoints.count-1]
+                    $TableMember | Add-Member -type NoteProperty -name Location -Value $ReplVM.RecoveryFabricFriendlyName
+                    $TableMember | Add-Member -type NoteProperty -name Server -Value $ReplVM.RecoveryAzureVMName
+                    $TableMember | Add-Member -type NoteProperty -name State -Value $LastRecoveryPoint.RecoveryPointType
+                    $TableMember | Add-Member -type NoteProperty -name RPTime -Value $LastRecoveryPoint.RecoveryPointTime
+                    $TableMember | Add-Member -type NoteProperty -name Policy -Value $ReplVM.PolicyFriendlyName
+                    $TableMember | Add-Member -type NoteProperty -name LastOKTest -Value $ReplVM.LastSuccessfulTestFailoverTime
+                    $TableArray.Add($TableMember) | Out-Null
+                }
+            }   
+        }
+        if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
+        if ($Activity) { Write-Progress -ID 0 -Activity $ASRActivity -Status "Ready" -Completed }
+    }
+    FindWordDocumentEnd
+    if ($TableArray){ 
+        $TableArray = $TableArray | Sort-Object Location,Server
+        $WordTable = AddWordTable -CustomObject $TableArray -Columns Location, Server, State, RPTime, Policy -Headers "Location", "Server", "Status", "Last Restore Point Time (UTC)", "Policy"
+        FindWordDocumentEnd
+        $Selection.TypeParagraph()
+    }
+    else {
+        $Selection.TypeParagraph()
         $Selection.TypeText("No Replication Jobs found.") 
     }
+    if ($ASRPolicies) {
+        $TableArray = [System.Collections.ArrayList]@()
+        foreach ($ASRPolicy in $ASRPolicies) {
+            $TableMember = New-Object System.Object;
+            $TableMember | Add-Member -type NoteProperty -name Name -Value $ASRPolicy.Name
+            $TableMember | Add-Member -type NoteProperty -name ACFM -Value $ASRPolicy.ReplicationProviderSettings.AppConsistentFrequencyInMinutes
+            $TableMember | Add-Member -type NoteProperty -name CCFIM -Value $ASRPolicy.ReplicationProviderSettings.CrashConsistentFrequencyInMinutes
+            $TableMember | Add-Member -type NoteProperty -name MVMSS -Value $ASRPolicy.ReplicationProviderSettings.MultiVmSyncStatus
+            $TableMember | Add-Member -type NoteProperty -name RPH -Value $ASRPolicy.ReplicationProviderSettings.RecoveryPointHistory
+            $TableMember | Add-Member -type NoteProperty -name RPTIM -Value $ASRPolicy.ReplicationProviderSettings.RecoveryPointThresholdInMinutes
+            $TableArray.Add($TableMember) | Out-Null
+        }
+        $Selection.Style = $Heading3
+        $Selection.TypeText("Replication Polcies")
+        $Selection.TypeParagraph()
+        $TableArray = $TableArray | Sort-Object Name
+        $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, ACFM, CCFIM, MVMSS, RPH, RPTIM -Headers "Name", "AppConst (Min)", "CrashConst (Min)", "MulitVMSync", "RP History", "RP Thres. (Min)"
+        FindWordDocumentEnd
+        $Selection.TypeParagraph()
+    }
+    else {
+        $Selection.TypeParagraph()
+        $Selection.TypeText("No Replication Policies found.") 
+    }       
 }
 
 Write-Output "Creating Firewall table"
