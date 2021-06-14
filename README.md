@@ -1,13 +1,19 @@
 # Azure2Word.ps1
-Azure2Word uses powershell to get Azure information and puts this in a Word document
+<B>Azure2Word</B> uses powershell to get Azure information and puts this in a Word document
 
 Currently Documented:
 
-Azure Backup (VM/SQL)
+Azure Backup (VM/SQL) + Policies
+
+Azure Bastion
 
 Azure Firewall
 
-Azure Replication
+Azure Network information (VNET/Subnets/NAT Gateway)
+
+Azure Replication + Policies
+
+Load Balancer
 
 NSG (Network Security Groups)
 
@@ -15,7 +21,7 @@ Public IPs
 
 Virtual Machine information 
 
-VPN (Site 2 site)
+VPN (ExpressRoute and Site 2 site)
 
 Works with Word Office365
 
@@ -29,6 +35,8 @@ Connects to Azure powershell to get information
 
 [REQUIRED] This is the path where the report is stored
 
+    .\Azure2Word -Customer Contoso -ReportPath c:\reports
+
 .PARAMETER TenantId
 
 [OPTIONAL] When you have mutiple Tennants (CSP) enter the Tenant GUID
@@ -38,25 +46,20 @@ Connects to Azure powershell to get information
 [OPTIONAL] When you have mutiple Subscriptions (CSP) enter the Subscription GUID
 
 .\Azure2Word -Customer Contoso -ReportPath c:\reports
-
     Runs the script for customer Contoso and create the word file in c:\reports
-    
-.\Azure2Word -Customer Contoso -ReportPath c:\reports -TenantId xxxx-xxxx -SubscriptionId yyyy-yyyy
-
-    Runs the script for customer Contoso and create the word file in c:\reports 
-    
     Running the scipt on TenantID xxxx-xxxx and SubscriptionID yyyy-yyy
     
+    .\Azure2Word -Customer Contoso -ReportPath c:\reports -TenantId xxxx-xxxx -SubscriptionId yyyy-yyyy
+
+.PARAMETER SkipVaults
+
+[OPTIONAL] When you do not wat Vault information (Backup and Replication)
+
+Runs the script for customer Contoso and create the word file in c:\reports skipping Backup and Replication Documentation
+    
+    .\Azure2Word -Customer Contoso -ReportPath c:\reports -SkipVaults:$true
+
 Author: Xander Angenent (@XaAng70)
-
-The Word file generation part of the script is based upon the work done by:
-
-Carl Webster  | http://www.carlwebster.com | @CarlWebster
-
-Iain Brighton | http://virtualengine.co.uk | @IainBrighton
-
-Jeff Wouters  | http://www.jeffwouters.nl  | @JeffWouters
-
 
 Uses modules AZ and Az.Reservations
 
@@ -67,5 +70,10 @@ Install-Module -Name Az.Accounts -RequiredVersion 1.9.2
 Install-Module -Name Az.Reservations
 
 Idea: Anders Bengtsson http://contoso.se/blog/?p=4286
+The Word file generation part of the script is based upon the work done by:
 
-Last Modified: 2021/03/24
+Carl Webster  | http://www.carlwebster.com | @CarlWebster
+Iain Brighton | http://virtualengine.co.uk | @IainBrighton
+Jeff Wouters  | http://www.jeffwouters.nl  | @JeffWouters
+
+Last Modified: 2021/06/14
