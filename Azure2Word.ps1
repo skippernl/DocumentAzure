@@ -1249,8 +1249,8 @@ else {
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  RetentionDaily           : $($BackupSchRP.MonthlySchedule.RetentionScheduleDaily)")
                             $Selection.TypeParagraph()
-                            $DayOfWeek = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
-                            $Week = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionScheduleWeekly.DaysOfTheWeek
+                            $DayOfWeek = ArrayToLine $BackupSchRP.MonthlySchedule.DaysOfTheWeek
+                            $Week = ArrayToLine $BackupSchRP.MonthlySchedule.WeeksOfTheMonth
                             $Selection.TypeText("  RetentionWeekly          : $DayOfWeek $Week")
                             $Selection.TypeParagraph()
                             $Value = ArrayToLine $BackupSchRP.MonthlySchedule.RetentionTimes
@@ -1719,6 +1719,31 @@ if ($ALLLBs) {
 else {
     $Selection.TypeParagraph()
     $Selection.TypeText("No load balancers found.")       
+}
+
+Write-Output "Getting Keyvault information"
+$KeyVaults = Get-AzKeyVault
+$Selection.Style = $Heading1
+$Selection.TypeText("KeyVaults")
+$Selection.TypeParagraph()
+FindWordDocumentEnd
+if ($KeyVaults) {
+    $TableArray = [System.Collections.ArrayList]@()
+    foreach ($KeyVault in  $KeyVaults) {
+        $TableMember = New-Object System.Object; 
+        $TableMember | Add-Member -type NoteProperty -name Name -Value $KeyVault.VaultName
+        $TableMember | Add-Member -type NoteProperty -name Location -Value $KeyVault.Location
+        $TableMember | Add-Member -type NoteProperty -name RGN -Value $KeyVault.ResourceGroupName
+        $TableArray.Add($TableMember) | Out-Null
+    }
+    $TableArray  = $TableArray | Sort-Object Name
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Location, RGN -Headers "Name", "Location", "ResourceGroup"
+    FindWordDocumentEnd
+    $Selection.TypeParagraph()
+}
+else {
+    $Selection.TypeParagraph()
+    $Selection.TypeText("No keyvaults found.")  
 }
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
