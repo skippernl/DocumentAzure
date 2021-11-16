@@ -366,19 +366,37 @@ Function InitFirewallRule {
 
 $StartScriptTime = get-date 
 Write-Output "Script Started."
-Connect-AzAccount | Out-Null
-if (!($?)) {
-    Write-Output "Error logging in to Azure."
-    Write-Output "Script stopped."
-    exit
-}
 if ($TenantId -and $SubscriptionId) {
-    Select-AzSubscription -TenantId  $TenantId -SubscriptionId $SubscriptionId | Out-Null
+    Connect-AzAccount -TenantId $TenantId -SubscriptionId $SubscriptionId | Out-Null
     if (!($?)) {
-        Write-Output "Unable to find Tennant or Subscription."
+        Write-Output "Error logging in to Azure."
         Write-Output "Script stopped."
         exit
     }
+}
+elseif ($TenantId) {
+    Connect-AzAccount -TenantId $TenantId | Out-Null
+    if (!($?)) {
+        Write-Output "Error logging in to Azure."
+        Write-Output "Script stopped."
+        exit
+    }
+}
+elseif ($SubscriptionId) {
+    Connect-AzAccount -SubscriptionId $SubscriptionId | Out-Null
+    if (!($?)) {
+        Write-Output "Error logging in to Azure."
+        Write-Output "Script stopped."
+        exit
+    }
+}
+else {
+    Connect-AzAccount | Out-Null
+    if (!($?)) {
+        Write-Output "Error logging in to Azure."
+        Write-Output "Script stopped."
+        exit
+    }    
 }
 ##Init Arrays and other default parameters
 $NetworkGatewayConnections = [System.Collections.ArrayList]@()
@@ -420,10 +438,10 @@ $alignmentTab = "microsoft.office.interop.word.WdAlignmentTabAlignment" -as [typ
 $section = $Document.sections.item(1)
 $header = $section.headers.item($HeaderFooterIndex::wdHeaderFooterFirstPage)
 $header.range.InsertAlignmentTab($alignmentTab::wdRight)
-$header.range.InsertAfter("Azure Documentation for $Customer")
+$header.range.InsertAfter("Azure documentation for $Customer")
 ## Add some text to start with
 $Selection.Style = $Title
-$Selection.TypeText("Azure Documentation for $Customer")
+$Selection.TypeText("Azure documentation for $Customer")
 $Selection.TypeParagraph()
 $Selection.TypeParagraph()
 
@@ -432,11 +450,14 @@ $range = $Selection.Range
 $toc = $Document.TablesOfContents.Add($range)
 $Selection.TypeParagraph()
 
+## Get all VMs from Azure
+#Connect-AzAccount
+Write-Output "Getting all Azure resources."
+$ALLAzureResources = Get-AzResource
 
 ###
 ### VIRTUAL MACHINES
 ###
-
 
 ## Add some text
 $Selection.InsertNewPage()
@@ -444,17 +465,13 @@ $Selection.Style = $Heading1
 $Selection.TypeText("Virtual Machines")
 $Selection.TypeParagraph()
 
-## Get all VMs from Azure
-#Connect-AzAccount
-Write-Output "Getting All Azure Resources"
-$ALLAzureResources = Get-AzResource
 
-Write-Output "Getting VM's"
+Write-Output "Selecting VM's."
 $VMs = Get-AzVM -Status | Sort-Object Name
 $VMArray = [System.Collections.ArrayList]@()
 
 ## Values
-Write-Output "Creating VM table"
+Write-Output "Creating VM table."
 Foreach ($VM in $VMs) {
 
     $TableMember = New-Object System.Object;
@@ -493,14 +510,14 @@ $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("Virtual Machine Disks")
 $Selection.TypeParagraph()
-Write-Output "Getting Disk information"
+Write-Output "Getting disk information."
 $Disks = get-Azdisk | Sort-Object Name
 
 ## Add a table for Disks
 $TableArray = [System.Collections.ArrayList]@()
 
 ## Values
-Write-Output "Creating Disk table"
+Write-Output "Creating disk table."
 Foreach ($Disk in $Disks) {
 
     $TableMember = New-Object System.Object;
@@ -532,10 +549,10 @@ $Selection.TypeParagraph()
 ########
 
 $Selection.Style = $Heading2
-$Selection.TypeText("Network Interfaces")
+$Selection.TypeText("Network interfaces")
 $Selection.TypeParagraph()
 
-Write-Output "Getting Network interfaces"
+Write-Output "Getting network interfaces."
 $NICs = Get-AzNetworkInterface | Sort-Object Name
 $TableArray = [System.Collections.ArrayList]@()
 
@@ -547,7 +564,7 @@ Foreach ($NIC in $NICs) {
     $TableMember = New-Object System.Object;
     ## Get connected VM, if there is one connected to the network interface
     If (!$NIC.VirtualMachine.id) {
-         $VMLabel = "-"
+        $VMLabel = "-"
     }
     Else
     {
@@ -579,11 +596,11 @@ $Selection.TypeParagraph()
 $Selection.Style = $Heading2
 $Selection.TypeText("Reservations")
 $Selection.TypeParagraph()
-Write-Output "Getting Reservations"
+Write-Output "Getting reservations."
 #If there are no reservations - Operation returned an invalid status code 'Forbidden' is being displayed
 $ALLReservationOrders = Get-AzReservationOrder | Sort-Object Name
 
-Write-Output "Creating Reservation table"
+Write-Output "Creating reservation table."
 $TableArray = [System.Collections.ArrayList]@()
 Foreach ($ReservationOrder in $ALLReservationOrders) {  
     $AllReservations = Get-AzReservation -ReservationOrderId $ReservationOrder.Name
@@ -615,7 +632,7 @@ if ($TableArray) {
 }
 else {
     $Selection.TypeParagraph()
-    $Selection.TypeText("No Reservations found.")  
+    $Selection.TypeText("No reservations found.")  
 }
 FindWordDocumentEnd
 $Selection.TypeParagraph()
@@ -626,14 +643,14 @@ $Selection.TypeParagraph()
 
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
-$Selection.TypeText("Network Security Groups")
+$Selection.TypeText("Network security groups")
 $Selection.TypeParagraph()
 Write-Output "Getting NSGs"
 $NSGs = Get-AzNetworkSecurityGroup | Sort-Object Name
 
 ## Write NICs to NIC table 
 
-Write-Output "Creating NSG table"
+Write-Output "Creating NSG table."
 $TableArray = [System.Collections.ArrayList]@()
 
 Foreach ($NSG in $NSGs) {
@@ -673,7 +690,7 @@ $Selection.TypeParagraph()
 ######## Create a table for each NSG
 ########
 
-Write-Output "Creating Rule table"
+Write-Output "Creating rule table."
 ForEach ($NSG in $NSGs) {
 
     ## Add Heading for each NSG
@@ -735,12 +752,12 @@ ForEach ($NSG in $NSGs) {
 ##Get al Azure VPNs
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
-$Selection.TypeText("VPN Information")
+$Selection.TypeText("VPN information")
 $Selection.TypeParagraph()
 $Selection.Style = $Heading2
-$Selection.TypeText("VPN Gateway Connections")
+$Selection.TypeText("VPN gateway connections")
 $Selection.TypeParagraph()
-Write-Output "Getting VPN Gateway Connections"
+Write-Output "Getting VPN gateway connections"
 $NetworkConnections = $ALLAzureResources | Where-Object {$_.ResourceType -eq "Microsoft.Network/connections" } | Sort-Object Name
 Foreach ($NetworkConnection in $NetworkConnections) {
     $NGC = Get-AzVirtualNetworkGatewayConnection -ResourceName $NetworkConnection.ResourceName -ResourceGroupName $NetworkConnection.ResourceGroupName
@@ -753,7 +770,7 @@ $TableArray = [System.Collections.ArrayList]@()
 ######## Create a table for VPN GatewayConnections
 ########
 ## Values
-Write-Output "Creating VPN table"
+Write-Output "Creating VPN table."
 $ExpressRouteFound=$False
 Foreach ($NGC in $NetworkGatewayConnections) {
     $TableMember = New-Object System.Object;
@@ -847,7 +864,7 @@ if ($ExpressRouteFound) {
 }
 
 $Selection.Style = $Heading2
-$Selection.TypeText("VPN Local Gateways")
+$Selection.TypeText("VPN local gateways")
 $Selection.TypeParagraph()
 foreach ($LocalEndPointResourceGroupName in $LocalEndPointResourceGroupNames) {
     $LocalGateway = Get-AzLocalNetworkGateway -ResourceGroupName $LocalEndPointResourceGroupName
@@ -865,7 +882,7 @@ $LocalGatewayArray = $LocalGatewayArray | Sort-Object Name
 
 ## Values
 $TableArray = [System.Collections.ArrayList]@()
-Write-Output "Creating VPN LocalGateway table"
+Write-Output "Creating VPN localgateway table"
 Foreach ($LocalGateway in $LocalGatewayArray) {
     $TableMember = New-Object System.Object;
 
@@ -896,7 +913,7 @@ if ($TableArray) {
 }
 else {
     $Selection.TypeParagraph()
-    $Selection.TypeText("No Local gateway found.")  
+    $Selection.TypeText("No local gateway found.")  
 }
 FindWordDocumentEnd
 $Selection.TypeParagraph()
@@ -912,7 +929,7 @@ $AllPublicIPs = Get-AzPublicIpAddress | Sort-Object Name
 
 
 ## Values
-Write-Output "Creating Public IP table"
+Write-Output "Creating public IP table."
 $TableArray = [System.Collections.ArrayList]@()
 Foreach ($PublicIP in $AllPublicIPs) {
     $TableMember = New-Object System.Object;
@@ -946,10 +963,14 @@ $Selection.InsertNewPage()
 $Selection.Style = $Heading1
 $Selection.TypeText("Backup and Replication")
 $Selection.TypeParagraph()
+FindWordDocumentEnd
 if ($SkipVaults) {
-    $Selection.TypeText("No Vault information selected.") 
+    $Selection.TypeText("-SkipVaults option selected.")
     $Selection.TypeParagraph()
-    Write-Output "Skipping Vault information"
+    $Selection.TypeText("No information documented.") 
+    $Selection.TypeParagraph()
+    FindWordDocumentEnd
+    Write-Output "Skipping vault information"
 }
 else {
     $Vaults = Get-AzRecoveryServicesVault | Sort-Object Name
@@ -961,7 +982,7 @@ else {
     #Get Only Restore points of the last week.
     $startDate = (Get-Date).AddDays(-7)
     $endDate = Get-Date
-    Write-Output "Creating Backup job table"
+    Write-Output "Creating backup job table."
     $Selection.Style = $Heading2
     $Selection.TypeText("Backup")
     $Selection.TypeParagraph()
@@ -1005,22 +1026,11 @@ else {
                         #Friendly name can be in multiple namedcontainers
                         if ($BackupJob.workloadname.ToUpper() -eq $namedContainer.FriendlyName.ToUpper()) {
                             $BackupnamedContainer = $namedContainer
-                            $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer  -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
-                            $rp += Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
+                            $backupitem = Get-AzRecoveryServicesBackupItem -Container $BackupnamedContainer -WorkloadType $BackupJob.BackupManagementType -VaultId $Vault.ID
+                            $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
                         }
                     }
                     $WorkloadName = $BackupJob.workloadname.ToUpper()
-                    if ($rp) {
-                        $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
-                    }
-                    else {
-                        if ($BackupJob.Operation -eq "ConfigureBackup") {
-                            $LatestRestorePoint = "Configuring"
-                        }
-                        else {
-                            $LatestRestorePoint = "Unkown"
-                        }
-                    }
                 }
                 "AzureWorkload" {
                     $WorkloadArray = $BackupJob.workloadname.Split(" ")
@@ -1040,24 +1050,17 @@ else {
                     else {
                         $LatestRestorePoint = "Unkown"
                     }
-                    $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
                     foreach ($backupitem in $bkpItems) {
+                        if ($backupitem.ParentType -eq "AzureVmWorkloadSQLAvailabilityGroup") {
+                            $SQLServer = $backupitem.ParentName
+                        }
                         $ServerNameArray=$backupitem.ServerName.Split(".")
-                        if ($ServerNameArray[0] -eq $SQLServer){ 
-                            $rp = Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
-                            if ($rp) {
-                                $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
-                            }
-                            else {
-                                if ($BackupJob.Operation -eq "ConfigureBackup") {
-                                    $LatestRestorePoint = "Configuring"
-                                }
-                                else {
-                                    $LatestRestorePoint = "Unkown"
-                                }
-                            }
+                        $BackupSQL = $ServerNameArray[0]
+                        if ($BackupSQL -eq $SQLServer){ 
+                            $rp += Get-AzRecoveryServicesBackupRecoveryPoint -Item $backupitem -StartDate $startdate.ToUniversalTime() -EndDate $enddate.ToUniversalTime() -VaultId $Vault.ID
                         }
                     }  
+                    $WorkloadName = $SQLServer.ToUpper() + " " + $SQLDatabase.ToUpper()
                 }
                 default {
                     if ($BackupJob.Operation -eq "ConfigureBackup") {
@@ -1066,6 +1069,18 @@ else {
                     else {
                         $LatestRestorePoint = "Unkown"
                     }
+                }
+            }
+            if ($rp) {
+                $rp = $rp | Sort-Object RecoveryPointTime -Descending
+                $LatestRestorePoint = $rp[0].RecoveryPointTime.ToString()
+            }
+            else {
+                if ($BackupJob.Operation -eq "ConfigureBackup") {
+                    $LatestRestorePoint = "Configuring"
+                }
+                else {
+                    $LatestRestorePoint = "Unkown"
                 }
             }
             $TableMember | Add-Member -type NoteProperty -name Name -Value $Vault.Name
@@ -1093,6 +1108,7 @@ else {
         }
         if ($Activity) { Write-Progress -ID 1 -Activity $Activity -Status "Ready" -Completed }
     }
+    Write-Progress -ID 0 -Activity $Activity -Status "Ready" -Completed
     FindWordDocumentEnd
     if ($TableArray){ 
         $TableArray = $TableArray | Sort-Object Name, Workload
@@ -1101,12 +1117,14 @@ else {
         $Selection.TypeParagraph()
         switch ($backupFailed) {
             1 { 
-                $Selection.TypeText("One failed backup where found!")
+                $Selection.TypeText("One failed backup was found!")
+                $Selection.TypeParagraph()
                 $Selection.TypeText("The job that failed is: $BackupJobFailed.")   
                 $Selection.TypeParagraph()
             }
             2 {
                 $Selection.TypeText("Two or more failed backups where found!")
+                $Selection.TypeParagraph()
                 $Selection.TypeText("The jobs that failed are $BackupJobFailed.")   
                 $Selection.TypeParagraph()
             }
@@ -1115,10 +1133,12 @@ else {
     }
     else {
         $Selection.TypeParagraph()
-        $Selection.TypeText("No Backups found.") 
+        $Selection.TypeText("No backups found.") 
+        $Selection.TypeParagraph()
     }
+    FindWordDocumentEnd
     $Selection.Style = $Heading3
-    $Selection.TypeText("Backup Policy")
+    $Selection.TypeText("Backup policy")
     $Selection.TypeParagraph()
     If ($BackupPolicies) {
         $TableArray = [System.Collections.ArrayList]@()
@@ -1133,7 +1153,7 @@ else {
                     "AzureVM" {     
                         $BackupSchRP = $BackupSchedule.RetentionPolicy
                         if ($BackupSchRP.IsDailyScheduleEnabled) {
-                            $Selection.TypeText("Daily Schedule is enabled.")
+                            $Selection.TypeText("Daily schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Days   : $($BackupSchRP.DailySchedule.DurationCountInDays)")
                             $Selection.TypeParagraph()
@@ -1142,11 +1162,11 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Daily Schedule is disabled.")
+                            $Selection.TypeText("Daily schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsWeeklyScheduleEnabled) { 
-                            $Selection.TypeText("Weekly Schedule is enabled.")
+                            $Selection.TypeText("Weekly schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Weeks  : $($BackupSchRP.WeeklySchedule.DurationCountInWeeks)")
                             $Selection.TypeParagraph()
@@ -1158,11 +1178,11 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Weekly Schedule is disabled.")
+                            $Selection.TypeText("Weekly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsMonthlyScheduleEnabled) {
-                            $Selection.TypeText("Monthly Schedule is enabled.")
+                            $Selection.TypeText("Monthly schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Months : $($BackupSchRP.MonthlySchedule.DurationCountInMonths)")
                             $Selection.TypeParagraph()
@@ -1179,11 +1199,11 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Monthly Schedule is disabled.")
+                            $Selection.TypeText("Monthly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsYearlyScheduleEnabled) {
-                            $Selection.TypeText("Yearly Schedule is enabled.")
+                            $Selection.TypeText("Yearly schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Years  : $($BackupSchRP.YearlySchedule.DurationCountInYears)")
                             $Selection.TypeParagraph()
@@ -1203,7 +1223,7 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Yearly Schedule is disabled.")
+                            $Selection.TypeText("Yearly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                     }
@@ -1212,7 +1232,7 @@ else {
                         $Selection.TypeParagraph()
                         $BackupSchRP = $BackupSchedule.FullBackupRetentionPolicy
                         if ($BackupSchRP.IsDailyScheduleEnabled) {
-                            $Selection.TypeText("Daily Schedule enabled.")
+                            $Selection.TypeText("Daily schedule enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Days   : $($BackupSchRP.DailySchedule.DurationCountInDays)")
                             $Selection.TypeParagraph()
@@ -1221,7 +1241,7 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Daily Schedule is disabled.")
+                            $Selection.TypeText("Daily schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsWeeklyScheduleEnabled) { 
@@ -1237,11 +1257,11 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Weekly Schedule is disabled.")
+                            $Selection.TypeText("Weekly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsMonthlyScheduleEnabled) {
-                            $Selection.TypeText("Monthly Schedule is enabled.")
+                            $Selection.TypeText("Monthly schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Months : $($BackupSchRP.MonthlySchedule.DurationCountInMonths)")
                             $Selection.TypeParagraph()
@@ -1258,11 +1278,11 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Monthly Schedule is disabled.")
+                            $Selection.TypeText("Monthly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchRP.IsYearlyScheduleEnabled) {
-                            $Selection.TypeText("Yearly Schedule is enabled.")
+                            $Selection.TypeText("Yearly schedule is enabled.")
                             $Selection.TypeParagraph()
                             $Selection.TypeText("  Duration count in Years  : $($BackupSchRP.YearlySchedule.DurationCountInYears)")
                             $Selection.TypeParagraph()
@@ -1282,7 +1302,7 @@ else {
                             $Selection.TypeParagraph()
                         }
                         else  {
-                            $Selection.TypeText("Yearly Schedule is disabled.")
+                            $Selection.TypeText("Yearly schedule is disabled.")
                             $Selection.TypeParagraph()
                         }
                         if ($BackupSchedule.IsLogBackupEnabled) {
@@ -1315,10 +1335,10 @@ else {
     }
     else {
         $Selection.TypeParagraph()
-        $Selection.TypeText("No Backups Policies found.")         
+        $Selection.TypeText("No backup policies found.") 
+        FindWordDocumentEnd
     }
-
-    Write-Output "Creating Replication job table"
+    Write-Output "Creating replication job table."
     #Adding recovery information
     #Only get information from last 24h
     $ASRFabrics += Get-AzRecoveryServicesAsrFabric
@@ -1374,13 +1394,15 @@ else {
     if ($TableArray){ 
         $TableArray = $TableArray | Sort-Object Location,Server
         $WordTable = AddWordTable -CustomObject $TableArray -Columns Location, Server, State, RPTime, Policy -Headers "Location", "Server", "Status", "Last Restore Point Time (UTC)", "Policy"
-        FindWordDocumentEnd
-        $Selection.TypeParagraph()
     }
     else {
+        $Selection.TypeText("No replication jobs found.") 
         $Selection.TypeParagraph()
-        $Selection.TypeText("No Replication Jobs found.") 
     }
+    FindWordDocumentEnd
+    $Selection.Style = $Heading3
+    $Selection.TypeText("Replication polcies")
+    $Selection.TypeParagraph()   
     if ($ASRPolicies) {
         $TableArray = [System.Collections.ArrayList]@()
         foreach ($ASRPolicy in $ASRPolicies) {
@@ -1393,25 +1415,22 @@ else {
             $TableMember | Add-Member -type NoteProperty -name RPTIM -Value $ASRPolicy.ReplicationProviderSettings.RecoveryPointThresholdInMinutes
             $TableArray.Add($TableMember) | Out-Null
         }
-        $Selection.Style = $Heading3
-        $Selection.TypeText("Replication Polcies")
-        $Selection.TypeParagraph()
         $TableArray = $TableArray | Sort-Object Name
         $WordTable = AddWordTable -CustomObject $TableArray -Columns Name, ACFM, CCFIM, MVMSS, RPH, RPTIM -Headers "Name", "AppConst (Min)", "CrashConst (Min)", "MulitVMSync", "RP History", "RP Thres. (Min)"
-        FindWordDocumentEnd
-        $Selection.TypeParagraph()
     }
     else {
+        
+        $Selection.TypeText("No replication policies found.") 
         $Selection.TypeParagraph()
-        $Selection.TypeText("No Replication Policies found.") 
-    }       
+    }   
+    FindWordDocumentEnd    
 }
 
-Write-Output "Creating Firewall table"
+Write-Output "Creating Azure firewall table."
 
 $Selection.InsertNewPage()
 $Selection.Style = $Heading1
-$Selection.TypeText("Firewall")
+$Selection.TypeText("Azure firewall")
 $Selection.TypeParagraph()
 $TableArray = [System.Collections.ArrayList]@()
 
@@ -1428,7 +1447,7 @@ foreach ($FW in $FWs) {
 		$FirewallPRCG = Get-AzFirewallPolicyRuleCollectionGroup -AzureFirewallPolicyName $FirewallPolicyName -Name $FirewallPolicyRuleName -ResourceGroupName $FirewallResourceGroup
 		$FWRuleCollections = $FirewallPRCG.Properties.RuleCollection
 		Foreach ($FWRuleCollection in $FWRuleCollections) {
-   			foreach ($FWRule in $FWRuleCollection.Rules) {
+            foreach ($FWRule in $FWRuleCollection.Rules) {
 				$TableMember = InitFirewallRule
 				$TableMember | Add-Member -MemberType NoteProperty -name Firewall -Value $FW.Name -force
 				$TableMember | Add-Member -MemberType NoteProperty -name FirewallPolicyName -Value $FirewallPolicyName -force
@@ -1489,16 +1508,15 @@ if ($TableArray) {
         FindWordDocumentEnd
         $RuleTable = $RuleTable | Sort-Object Firewall, FirewallRulePrio
         $WordTable = AddWordTable -CustomObject $RuleTable -Columns Firewall, FirewallPolicyName, FirewallPolRuleName, NetworkRuleCollection, FirewallRuleName, FirewallRulePrio, Protocols, Source, Destination, DestinationPorts -Headers "Firewall", "Policy Name", "Rule Collection Group", "Network Rule Collection","Rule Name", "Priority", "Protocols", "Source", "Destination", "Destination Ports"
-        FindWordDocumentEnd
     }
 }
 Else { 
-    $Selection.TypeParagraph()
-    $Selection.TypeText("No Firewall found.")     
+    $Selection.TypeText("No Azure firewall found.")    
+    $Selection.TypeParagraph() 
 }
+FindWordDocumentEnd
 
-
-Write-Output "Creating IP Groups table"
+Write-Output "Creating IP groups table."
 $AllIPGroups = get-azipgroup
 if ($ALLIPGroups) {
     $TableArray = [System.Collections.ArrayList]@()
@@ -1527,7 +1545,7 @@ if ($ALLIPGroups) {
     FindWordDocumentEnd
 }
 ### Get NAT gateway information
-Write-Output "Creating NAT gateway table"
+Write-Output "Creating NAT gateway table."
 $NatGateways = Get-AzNatGateway
 
 if ($NatGateways) {
@@ -1549,13 +1567,13 @@ if ($NatGateways) {
     $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG, IP -Headers "Name", "ResourceGroup", "PublicIP"
     FindWordDocumentEnd
 }
-Write-Output "Creating Bastion table"
+Write-Output "Creating Bastion table."
 $Bastions = Get-AzBastion
 $Selection.Style = $Heading1
 $Selection.TypeText("Bastion")
 $Selection.TypeParagraph()
+FindWordDocumentEnd
 if ($Bastions) {
-    FindWordDocumentEnd
     $TableArray = [System.Collections.ArrayList]@()
     foreach ($Bastion in $Bastions) {
         $TableMember = New-Object System.Object;
@@ -1565,19 +1583,20 @@ if ($Bastions) {
         $TableArray.Add($TableMember) | Out-Null
     }
     $TableArray  = $TableArray | Sort-Object Name
-    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG, PrivAlloc -Headers "Name", "ResourceGroup", "PrivAllocMeth"
-    FindWordDocumentEnd
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, RG, PrivAlloc -Headers "Name", "ResourceGroup", "PrivAllocMethode"
 }
 else {
-    $Selection.TypeParagraph()
-    $Selection.TypeText("No bastion found.")       
+    $Selection.TypeText("No bastion found.")  
+    $Selection.TypeParagraph() 
+            
 }
+FindWordDocumentEnd 
 $ALLVirtualNetworks = Get-AzVirtualNetwork
 $Selection.Style = $Heading1
 $Selection.TypeText("Network")
 $Selection.TypeParagraph()
+FindWordDocumentEnd 
 if ($ALLVirtualNetworks) {
-    FindWordDocumentEnd
     $TableArray = [System.Collections.ArrayList]@()
     foreach ($VirtualNetwork in $ALLVirtualNetworks) {
         foreach ($Subnet in $VirtualNetwork.Subnets) {
@@ -1597,19 +1616,19 @@ if ($ALLVirtualNetworks) {
         }
     }
     $TableArray  = $TableArray | Sort-Object Name
-    $WordTable = AddWordTable -CustomObject $TableArray  -Columns VNName, RG, SubName, Address, NAT -Headers "Virtual Network", "ResourceGroup", "Subnet Name", "IP Address", "NAT"
-    FindWordDocumentEnd        
+    $WordTable = AddWordTable -CustomObject $TableArray  -Columns VNName, RG, SubName, Address, NAT -Headers "Virtual Network", "ResourceGroup", "Subnet Name", "IP Address", "NAT"       
 }
 else {
-    $Selection.TypeParagraph()
-    $Selection.TypeText("No network found.")       
+    $Selection.TypeText("No network found.")        
+    $Selection.TypeParagraph()   
 }
-Write-Output "Getting Load Balancers"
+FindWordDocumentEnd 
+Write-Output "Getting load balancers."
 $ALLLBs = Get-AzLoadBalancer
 $Selection.Style = $Heading1
-$Selection.TypeText("LoadBalancers")
+$Selection.TypeText("Loadbalancers")
 $Selection.TypeParagraph()
-FindWordDocumentEnd
+FindWordDocumentEnd 
 if ($ALLLBs) {
     $TableArray = [System.Collections.ArrayList]@()
     foreach ($LB in $ALLLBs) { 
@@ -1682,7 +1701,7 @@ if ($ALLLBs) {
         FindWordDocumentEnd
         $TableArray = [System.Collections.ArrayList]@()
         $Selection.Style = $Heading3
-        $Selection.TypeText("LoadBalancer Probes")
+        $Selection.TypeText("Loadbalancer probes")
         $Selection.TypeParagraph()
         foreach ($LBProbe in $LB.Probes) {
             $TableMember = New-Object System.Object;
@@ -1697,7 +1716,7 @@ if ($ALLLBs) {
         FindWordDocumentEnd
         $TableArray = [System.Collections.ArrayList]@()
         $Selection.Style = $Heading3
-        $Selection.TypeText("LoadBalancer Rules")
+        $Selection.TypeText("Loadbalancer rules")
         $Selection.TypeParagraph()
         foreach ($LBRule in $LB.loadbalancingrules) {
             $TableMember = New-Object System.Object;
@@ -1712,16 +1731,14 @@ if ($ALLLBs) {
         }
         $TableArray  = $TableArray | Sort-Object Name
         $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Prot, Fp, BP, Timeout, Probe -Headers "Name", "Protocol", "Frontend Port", "Backend Port", "Timeout", "Probe"
-        FindWordDocumentEnd
-        $Selection.TypeParagraph()
     }
 }
 else {
-    $Selection.TypeParagraph()
-    $Selection.TypeText("No load balancers found.")       
+    $Selection.TypeText("No load balancers found.") 
+    $Selection.TypeParagraph()  
 }
-
-Write-Output "Getting Keyvault information"
+FindWordDocumentEnd 
+Write-Output "Getting keyvault information."
 $KeyVaults = Get-AzKeyVault
 $Selection.Style = $Heading1
 $Selection.TypeText("KeyVaults")
@@ -1738,13 +1755,12 @@ if ($KeyVaults) {
     }
     $TableArray  = $TableArray | Sort-Object Name
     $WordTable = AddWordTable -CustomObject $TableArray  -Columns Name, Location, RGN -Headers "Name", "Location", "ResourceGroup"
-    FindWordDocumentEnd
-    $Selection.TypeParagraph()
 }
 else {
-    $Selection.TypeParagraph()
     $Selection.TypeText("No keyvaults found.")  
+    $Selection.TypeParagraph()
 }
+FindWordDocumentEnd
 ### Update the TOC now when all data has been written to the document 
 $toc.Update()
 
